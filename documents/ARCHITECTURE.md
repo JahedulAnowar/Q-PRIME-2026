@@ -1,20 +1,104 @@
 # Architecture
 
-Q-PRIME owns the paper-processing path after a raw record is produced.
+Q-PRIME is the paper implementation that begins after a producer has created
+a raw context record. It does not generate device traffic. The same pipeline
+processes a direct producer record and an EdgeX event, so both receive the
+same QoC evaluation, privacy checks, weighting, placement decision, and
+persistent evidence.
 
-```text
-direct ingress ──────────────┐
-                            ├─> normalise -> QoC baseline/evaluation -> privacy -> weights/AHP
-device -> EdgeX -> HTTP ─────┘                                           |
-                                                                          v
-                                                            Edge | Cloud | Both
-                                                              |              |
-                                                        MongoDB Edge   AWS or MongoDB
-                                                                       Cloud fallback
+```mermaid
+flowchart TB
+    subgraph Input[External inputs]
+        Direct[External producer<br/>POST /api/ingest]
+        Device[Real device or gateway]
+        EdgeX[EdgeX Foundry]
+        Device --> EdgeX
+    end
+
+    subgraph Pipeline[Q-PRIME paper pipeline]
+        CoreApi[Core API]
+        Ingest[Normalise and deduplicate]
+        Policy[Resolve device, stream, or global policy]
+        Evaluate[QoC baseline and five-factor evaluation]
+        Privacy[PII detection and privacy controls]
+        Score[Criteria weights or AHP<br/>score Edge / Cloud / Both]
+
+        CoreApi --> Ingest --> Policy --> Evaluate --> Privacy --> Score
+    end
+
+    Direct -->|POST /api/ingest| CoreApi
+    EdgeX -->|HTTP export<br/>/api/ingest/edgex| CoreApi
+
+    subgraph Persistence[Placement and persistent evidence]
+        Edge[(MongoDB<br/>edge_records)]
+        LocalCloud[(MongoDB<br/>cloud_records fallback)]
+        AWS[AWS Kinesis or Firehose<br/>when configured]
+        Evidence[(MongoDB<br/>placements, profiles, baselines, audit)]
+    end
+
+    Score -->|Edge or Both| Edge
+    Score -->|Cloud or Both; AWS unavailable or write fails| LocalCloud
+    Score -->|Cloud or Both; AWS configured| AWS
+    Score --> Evidence
+    CoreApi -->|configuration and dashboard reads| Evidence
+    Policy <--> Evidence
+    Evaluate <--> Evidence
+
+    subgraph ReadPaths[Query and visualisation]
+        Web[Query application<br/>and Q-PRIME dashboard<br/>localhost:3000]
+        NLP[NLP service<br/>natural language to SQL]
+        Router[Core query router<br/>read-only SQL]
+        Presto[PrestoDB<br/>MongoDB Edge and local Cloud]
+        Athena[Athena<br/>active AWS Cloud]
+    end
+
+    Web -->|natural-language query| NLP --> Router
+    Web -->|SQL query| Router
+    Web -->|results and configuration APIs| CoreApi
+    Router --> Presto
+    Router -->|AWS Cloud is configured| Athena
+    AWS --> Athena
 ```
 
-The decision and effective policy version are always retained in MongoDB. Edge and local Cloud records are exposed to PrestoDB through separate collections. When AWS is configured, new Cloud writes use Kinesis or Firehose and Cloud reads use Athena. Existing local fallback data is not copied or replayed to AWS.
+## Record processing and policy
 
-The NLP and web applications query only the logical `qprime.continuum` table. The core validates the SQL and selects the appropriate physical source for Edge, Cloud, or continuum scope. `/qprime` is a separate route in the web application and reads dashboard projections from the core API.
+A direct producer posts a canonical record to `/api/ingest`. A real-device
+integration sends an EdgeX event, which the bundled HTTP-export service
+forwards to `/api/ingest/edgex`. Q-PRIME normalises either payload, creates or
+uses a stable record identifier, and ignores repeated deliveries.
 
-Policy is versioned at global, stream, and device scope. Resolution order is device, then stream, then global. QoC baselines, configuration audit history, placement decisions, and query metrics persist with the MongoDB volume.
+Before scoring a record, Q-PRIME resolves the active policy in this order:
+device override → stream override → global profile. The policy provides the
+criteria weights directly or derives them from the AHP matrix. The pipeline
+then evaluates timeliness, completeness, correctness, resolution, and
+significance; detects PII; applies strict privacy controls; and calculates the
+paper’s Edge and Cloud scores. A tie recommends Both.
+
+## Placement and persistence
+
+An Edge recommendation is retained in MongoDB `edge_records`. A Cloud
+recommendation writes to AWS Kinesis or Firehose only when AWS is configured;
+otherwise, or when that write fails, Q-PRIME retains the raw record in MongoDB
+`cloud_records` as a local Cloud fallback. A Both recommendation applies both
+active storage rules.
+
+Every placement also writes an immutable decision record containing the QoC
+scores, effective policy version, recommendation, actual backend, privacy
+findings, reason, and timings. MongoDB also persists policy versions, audit
+history, adaptive QoC baselines, and query metrics. Existing local Cloud
+fallback records are never copied to AWS when AWS later becomes available.
+
+## Query and dashboard paths
+
+The query application and the `/qprime` dashboard share the Next.js web
+application on port 3000 but have separate responsibilities. The query
+application accepts SQL or natural-language questions; the NLP service turns
+natural language into SQL, and the core query router validates that SQL before
+selecting its physical source.
+
+PrestoDB reads the MongoDB Edge and local Cloud fallback collections. When
+AWS Cloud is configured, Cloud queries are sent to Athena instead; earlier
+local fallback records remain in MongoDB and are not included in the active
+Cloud query path. The `/qprime` dashboard reads the persistent decision,
+configuration, QoC, privacy, and performance projections directly from the
+core API, so it continues to show the placement history across Cloud cutover.

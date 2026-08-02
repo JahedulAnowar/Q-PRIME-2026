@@ -22,19 +22,12 @@ export const useTemperatureData = ({
             setLoading(true);
             setError(null);
 
-            // Query for hourly temperature stats
-            const query = `SELECT *
+            // Select only dashboard-safe fields: canonical_json is not readable by Presto.
+            const query = `SELECT timestamp, resource.device_name, contextattribute, contextvalue
                 FROM ${SQL_TABLE}
                 WHERE resource.device_name = 'LabTHPSensor'
                 AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
                 AND FROM_UNIXTIME(timestamp) < NOW();`;
-
-            // Fix Edge Layer SQL command later
-            const queryEdge = `SELECT *
-                FROM ${SQL_TABLE}
-                WHERE resource.device_name = 'LabTHPSensor'
-                AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-                AND FROM_UNIXTIME(timestamp) < NOW()`;
 
             const response = await fetch(withBasePath("/api/dashboard/temperature"), {
                 method: "POST",

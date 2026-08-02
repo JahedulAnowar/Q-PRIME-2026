@@ -12,6 +12,10 @@ const SCOPE_TO_IS_CLOUD = {
     cloud: "true",
     continuum: "continuum",
 };
+const CONTEXT_VALUE_FIELDS = [
+    "event", "person", "distance", "temperature", "humidity",
+    "pressure", "moisture_pct", "smoke_ppm", "bpm",
+];
 
 /** Some query engines return struct/array columns as text; revive them. */
 function reviveCell(value) {
@@ -25,11 +29,21 @@ function reviveCell(value) {
     }
 }
 
+function normaliseContextValue(value) {
+    if (!Array.isArray(value)) return value;
+    return Object.fromEntries(
+        CONTEXT_VALUE_FIELDS.map((field, index) => [field, value[index] ?? null])
+    );
+}
+
 function reviveRow(row) {
     if (!row || typeof row !== "object") return row;
     const out = {};
     for (const [key, value] of Object.entries(row)) {
-        out[key] = reviveCell(value);
+        const revived = reviveCell(value);
+        out[key] = key.toLowerCase() === "contextvalue"
+            ? normaliseContextValue(revived)
+            : revived;
     }
     return out;
 }
