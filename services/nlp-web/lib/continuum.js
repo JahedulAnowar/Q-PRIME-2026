@@ -1,9 +1,7 @@
 /**
- * Query a user-owned edge/cloud data source.
+ * Query the Q-PRIME edge/cloud continuum.
  *
- * The endpoint is external to this repository and must implement the query
- * contract documented in the root README. Q-PRIME only submits read-only SQL
- * and renders the response.
+ * The server-side endpoint is wired to the core read-only query API by Compose.
  */
 
 const QUERY_API_URL = (process.env.QUERY_API_URL || "").trim();
@@ -51,7 +49,7 @@ export async function queryContinuum(request) {
 
         if (!QUERY_API_URL) {
             return Response.json(
-                { error: "Data source not configured. Set QUERY_API_URL." },
+                { error: "Q-PRIME query service is not configured." },
                 { status: 503 }
             );
         }
@@ -70,7 +68,7 @@ export async function queryContinuum(request) {
 
         if (!response.ok || payload.error) {
             return Response.json(
-                { error: payload.error || `External query API error ${response.status}` },
+                { error: payload.error || `Q-PRIME query API error ${response.status}` },
                 { status: response.status === 200 ? 500 : response.status }
             );
         }

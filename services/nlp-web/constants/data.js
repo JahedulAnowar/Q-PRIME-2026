@@ -97,11 +97,11 @@ export const quickActions = [
 // edge store and the cloud tier.
 export const exampleQueryTypes = {
     sql_cloud: [
-        "SELECT * FROM qprime.continuum WHERE resource.device_name = 'LabTHPSensor' ORDER BY timestamp DESC LIMIT 10;",
+        "SELECT timestamp, resource.device_id, resource.device_name, contextvalue.temperature, contextvalue.humidity FROM qprime.continuum WHERE contextattribute = 'thp' ORDER BY timestamp DESC LIMIT 10;",
         "SELECT resource.device_name, COUNT(*) AS events FROM qprime.continuum WHERE FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '24' HOUR GROUP BY resource.device_name;",
     ],
     sql_edge: [
-        "SELECT timestamp, resource.device_id, resource.device_name, contextvalue.event, contextvalue.person FROM qprime.continuum WHERE contextvalue.event = 'familiar_face_detected' ORDER BY timestamp DESC LIMIT 1;",
+        "SELECT timestamp, resource.device_id, resource.device_name, contextattribute, contextvalue.event, storage_location FROM qprime.continuum ORDER BY timestamp DESC LIMIT 10;",
         "SELECT storage_location, COUNT(*) AS records FROM qprime.continuum GROUP BY storage_location;",
     ],
     natural: [

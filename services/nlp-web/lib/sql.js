@@ -1,5 +1,5 @@
 /**
- * The logical table exposed by the user's external query API.
+ * The logical table exposed by the Q-PRIME query API.
  * `NEXT_PUBLIC_SQL_TABLE_NAME` can override the default name.
  */
 export const SQL_TABLE =

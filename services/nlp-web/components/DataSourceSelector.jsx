@@ -10,14 +10,13 @@ import { DATA_SCOPES } from "@/lib/sql";
 const ICONS = { continuum: Layers, edge: Server, cloud: Cloud };
 
 const HINTS = {
-    continuum: "Combined data exposed by your configured query source",
-    edge: "The edge scope exposed by your configured query source",
-    cloud: "The cloud scope exposed by your configured query source",
+    continuum: "Combined Q-PRIME Edge and Cloud view",
+    edge: "Records currently queryable from the Edge tier",
+    cloud: "Records currently queryable from the Cloud tier",
 };
 
 /**
- * The external query source's combined view is the default; edge-only and
- * cloud-only are optional filters.
+ * The combined continuum is the default; Edge and Cloud are optional filters.
  */
 const DataSourceSelector = ({ databaseLayer, setDatabaseLayer }) => {
     const [dataSourcesExpanded, setDataSourcesExpanded] = useState(true);

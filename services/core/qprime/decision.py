@@ -55,6 +55,25 @@ def _resolve_weights(
     """Return ``([w_t, w_s, w_p], source, consistency_ratio)``."""
     mode = cfg.get("weight_mode", "per_sensor")
 
+    if mode == "metric_level":
+        metric = cfg.get("metric_weights") or {}
+        temporal = float(metric.get("timeliness", 0.0)) + float(
+            metric.get("resolution", 0.0)
+        )
+        spatial = sum(
+            float(metric.get(name, 0.0))
+            for name in ("completeness", "correctness", "significance")
+        )
+        privacy = metric.get("privacy")
+        privacy = (
+            float(privacy)
+            if privacy is not None
+            else max(0.0, 1.0 - temporal - spatial)
+        )
+        raw = [temporal, spatial, privacy]
+        total = sum(raw) if sum(raw) != 0 else 1.0
+        return [weight / total for weight in raw], "metric_level", None
+
     if mode == "global_ahp":
         W, _lambda_max, _ci, cr = ahp.ahp_weights_and_consistency(cfg["ahp_matrix"])
         return W, "global_ahp", cr

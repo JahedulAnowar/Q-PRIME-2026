@@ -1,41 +1,20 @@
 # Architecture
 
-Q-PRIME has two product boundaries: stateless paper analysis and read-only
-querying of externally owned data.
-
-## Analysis flow
+Q-PRIME owns the paper-processing path after a raw record is produced.
 
 ```text
-caller-owned record
-    -> QoC/SLA evaluation
-    -> PII detection
-    -> direct or AHP-derived weights
-    -> Edge/Cloud/Both recommendation
-    -> synchronous response
+direct ingress ──────────────┐
+                            ├─> normalise -> QoC baseline/evaluation -> privacy -> weights/AHP
+device -> EdgeX -> HTTP ─────┘                                           |
+                                                                          v
+                                                            Edge | Cloud | Both
+                                                              |              |
+                                                        MongoDB Edge   AWS or MongoDB
+                                                                       Cloud fallback
 ```
 
-The analysis service has no record repository and no output connector.
+The decision and effective policy version are always retained in MongoDB. Edge and local Cloud records are exposed to PrestoDB through separate collections. When AWS is configured, new Cloud writes use Kinesis or Firehose and Cloud reads use Athena. Existing local fallback data is not copied or replayed to AWS.
 
-## Query flow
+The NLP and web applications query only the logical `qprime.continuum` table. The core validates the SQL and selects the appropriate physical source for Edge, Cloud, or continuum scope. `/qprime` is a separate route in the web application and reads dashboard projections from the core API.
 
-```text
-browser
-    -> Next.js query application
-       -> NLP API for natural-language questions
-       -> QUERY_API_URL for cards and charts
-    -> external query API
-    -> user-owned edge/cloud data sources
-```
-
-The external endpoint executes SQL and returns rows. Q-PRIME only generates
-queries, relays read requests, and presents the response.
-
-## Service boundaries
-
-- `services/core`: Flask API plus the QoC, privacy, AHP, configuration, and
-  recommendation modules.
-- `services/nlp`: Flask API for SQL generation and summarisation.
-- `services/nlp-web`: Next.js query and visualisation interface.
-
-There is intentionally no integration or persistence service in this
-repository.
+Policy is versioned at global, stream, and device scope. Resolution order is device, then stream, then global. QoC baselines, configuration audit history, placement decisions, and query metrics persist with the MongoDB volume.

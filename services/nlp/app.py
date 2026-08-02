@@ -1,9 +1,8 @@
 """Q-PRIME AI / NLP query service.
 
-Turns a natural-language question into SQL, sends the SQL to a user-owned
-read-only query API, and summarises the returned rows. Q-PRIME does not own,
-route, or persist the queried data. Edge-only, cloud-only, and combined
-scopes remain part of the external query contract.
+Turns a natural-language question into SQL, sends the SQL to the Q-PRIME
+read-only query API, and summarises the returned rows. Edge-only, cloud-only,
+and combined scopes are routed by the core placement-aware query service.
 
 Summaries are produced by the rule-based ``InfSummary`` - no LLM, no
 network. ``LLMInference`` (Ollama) is optional and only used when
@@ -80,7 +79,11 @@ def summary_envelope(summary: Any, scope: str, edge_count: int = 0, cloud_count:
     else:
         envelope = {"ok": True, "text": str(summary or ""), "meta": {}}
 
-    note = tier_note(edge_count, cloud_count)
+    # Aggregate SQL produces one result row per source, not one row per
+    # underlying record. Do not present that implementation detail as a data
+    # record count in the chat answer.
+    is_aggregate = bool((envelope.get("meta") or {}).get("aggregate"))
+    note = "" if is_aggregate else tier_note(edge_count, cloud_count)
     text = envelope.get("text") or ""
     if note and text:
         lines = text.split("\n")
@@ -104,9 +107,9 @@ def summary_envelope(summary: Any, scope: str, edge_count: int = 0, cloud_count:
 
 
 def fetch_rows(sql: str, scope: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]], int, int]:
-    """Ask the configured external query API for the selected rows."""
+    """Ask the Q-PRIME query API for the selected rows."""
     if not QUERY_API_URL:
-        raise RuntimeError("Data source not configured. Set QUERY_API_URL.")
+        raise RuntimeError("Q-PRIME query service is not configured. Set QUERY_API_URL.")
     response = requests.get(
         QUERY_API_URL,
         params={
@@ -119,10 +122,10 @@ def fetch_rows(sql: str, scope: str) -> Tuple[Dict[str, Any], List[Dict[str, Any
     try:
         payload = response.json()
     except ValueError as exc:
-        raise RuntimeError("External query API returned a non-JSON response") from exc
+        raise RuntimeError("Q-PRIME query API returned a non-JSON response") from exc
     if not response.ok:
         message = payload.get("error") or payload.get("message") or f"HTTP {response.status_code}"
-        raise RuntimeError(f"External query API error: {message}")
+        raise RuntimeError(f"Q-PRIME query API error: {message}")
     rows = payload.get("results")
     if rows is None:
         rows = payload.get("result") or []
@@ -210,9 +213,95 @@ def latest_reading_summary(rows: List[Dict[str, Any]]) -> Optional[str]:
     return f"Latest reading{where}{at}: {', '.join(parts)}."
 
 
+def aggregate_summary(rows: List[Dict[str, Any]], question: str) -> Optional[Dict[str, Any]]:
+    """Describe the one-row COUNT/AVG shapes used by the shipped examples."""
+    if len(rows) != 1:
+        return None
+    row = {str(key).lower(): value for key, value in rows[0].items()}
+    question_lower = question.lower()
+
+    for key in ("door_events", "n", "count", "records", "events"):
+        value = row.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            count = int(value)
+            location = row.get("storage_location")
+            if location and key == "records":
+                noun = "record" if count == 1 else "records"
+                return {
+                    "ok": True,
+                    "text": f"{count:,} {noun} stored at {location}.",
+                    "meta": {"aggregate": True},
+                }
+            if "door" in question_lower:
+                noun = "event" if count == 1 else "events"
+                period = " today" if "today" in question_lower else ""
+                text = f"{count:,} door {noun}{period}."
+            else:
+                noun = "record" if count == 1 else "records"
+                text = f"{count:,} {noun}."
+            return {"ok": True, "text": text, "meta": {"aggregate": True}}
+
+    value = row.get("avg_temperature_today")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {
+            "ok": True,
+            "text": f"Average temperature today is {float(value):.1f}\N{DEGREE SIGN}C.",
+            "meta": {"aggregate": True},
+        }
+    return None
+
+
+def latest_activity_summary(rows: List[Dict[str, Any]], question: str) -> Optional[Dict[str, Any]]:
+    """Describe the safe, flat projection used for latest-activity requests."""
+    if not rows or "latest" not in question.lower():
+        return None
+    row = {str(key).lower(): value for key, value in rows[0].items()}
+    device = row.get("device_name") or row.get("resource_device_name") or "a device"
+    stream = row.get("contextattribute") or "sensor activity"
+    event = row.get("event")
+    detail = f" ({event})" if event else ""
+    return {
+        "ok": True,
+        "text": f"Latest activity: {device} reported {stream}{detail}.",
+        "meta": {"rows_considered": len(rows)},
+    }
+
+
+def tabular_activity_summary(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Avoid applying vision-specific language to ordinary SQL result rows."""
+    if not rows:
+        return None
+    keys = {str(key).lower() for key in rows[0]}
+    if not ({"device_name", "resource_device_name"} & keys):
+        return None
+    devices = []
+    for row in rows:
+        value = row.get("device_name") or row.get("resource_device_name")
+        if value and value not in devices:
+            devices.append(str(value))
+    if not devices:
+        return None
+    noun = "record" if len(rows) == 1 else "records"
+    listed = ", ".join(devices[:3])
+    more = " and others" if len(devices) > 3 else ""
+    return {
+        "ok": True,
+        "text": f"Showing {len(rows):,} {noun} from {listed}{more}.",
+        "meta": {"rows_considered": len(rows)},
+    }
+
+
 def summarize(rows: List[Dict[str, Any]], question: str, sql: str) -> Any:
-    for shaped in (device_inventory_summary(rows), latest_reading_summary(rows)):
+    for shaped in (
+        aggregate_summary(rows, question),
+        latest_activity_summary(rows, question),
+        device_inventory_summary(rows),
+        latest_reading_summary(rows),
+        tabular_activity_summary(rows),
+    ):
         if shaped:
+            if isinstance(shaped, dict):
+                return shaped
             return {"ok": True, "text": shaped, "meta": {"rows_considered": len(rows)}}
     if USE_LLM_SUMMARY:
         try:
@@ -334,7 +423,7 @@ def query():
         print(f"[nlp] generated SQL: {sql_query}")
 
         if not QUERY_API_URL:
-            message = "Data source not configured. Set QUERY_API_URL to a read-only query endpoint."
+            message = "Q-PRIME query service is not configured. Set QUERY_API_URL."
             return (
                 jsonify(
                     {

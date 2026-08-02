@@ -2,59 +2,73 @@
 
 **A Quality- and Privacy-Aware Edge–Cloud Continuum Framework for Internet of Things Applications**
 
-[![Docker](https://img.shields.io/badge/docker-one--command%20deploy-2496ED?logo=docker&logoColor=white)](#-quick-start)
-[![EdgeX Foundry](https://img.shields.io/badge/EdgeX%20Foundry-3.1%20Napa-blueviolet)](https://www.edgexfoundry.org/)
-[![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](#)
-[![Tests](https://img.shields.io/badge/tests-96%20passing-2fbf71)](#-reproducing-the-papers-results)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-
-Q-PRIME decides — per record, in real time — whether IoT data should be stored at the **edge** or in the **cloud**, by scoring each record on five Quality-of-Context (QoC) factors (*timeliness, completeness, correctness, resolution, significance*) and combining them with **privacy awareness** through criteria weights that can be set directly or derived from an **AHP pairwise comparison matrix**.
-
-Placement is only half the story: the data must stay **usable** afterwards. Q-PRIME therefore exposes the whole edge–cloud continuum as **one queryable surface**, and ships the AI/NLP application service from the paper — ask *“how many door events today?”* in plain English and the answer spans both tiers.
-
-This repository is the research software release accompanying the paper:
-
-> K. S. Jagarlamudi *et al.*, “A Quality- and Privacy-Aware Edge–Cloud Continuum Framework for Internet of Things Applications”, *IEEE Access* (under review), 2026.
-
-This repository does not directly connect devices, ingest records, operate databases, route records, or persist sensor data. Those responsibilities belong to external integration software and data infrastructure. Users can either connect to their real devices or through the simulator.
+Q-PRIME implements the paper's Quality-of-Context evaluation, privacy analysis, criteria weighting/AHP, and per-record Edge/Cloud placement. It persists placement evidence and edge data in MongoDB, supports optional AWS Cloud storage, exposes a unified read-only SQL surface through PrestoDB/Athena, and includes the NLP query application.
 
 ## Architecture
 
 ```text
-caller-owned record
-    -> stateless analysis API
-    -> QoC scores + privacy findings + AHP weights + tier recommendation
+raw data record ─────────────────┐
+                                 ├─> Q-PRIME ingestion
+real device -> EdgeX -> export ──┘       -> QoC + privacy evaluation
+                                         -> profile weights / AHP
+                                         -> Edge | Cloud | Both decision
+                                         -> MongoDB Edge collection
+                                         -> AWS when configured, otherwise MongoDB Cloud fallback
 
-user question
-    -> NLP service generates read-only SQL
-    -> external QUERY_API_URL reads user-owned data
-    -> NLP summarises rows
-    -> Next.js query application renders answers and charts
+question -> NLP -> read-only SQL -> PrestoDB / Athena -> answer and charts
+                                  -> /qprime results and configuration UI
 ```
 
-The analysis and query flows are separate. The analysis API never sends its input to the query endpoint.
+Q-PRIME never moves retained fallback records into AWS. Once AWS is configured, new Cloud decisions are written there and Cloud queries are sent there; earlier fallback records remain in MongoDB for history and visualisation.
 
 ## Components
 
-| Component | Location | Default URL | Responsibility |
-|---|---|---|---|
-| Stateless analysis API | `services/core` | <http://localhost:5005> | QoC, privacy, AHP, and placement recommendation |
-| NLP API | `services/nlp` | <http://localhost:5500> | Natural language to SQL and result summarisation |
-| Query application | `services/nlp-web` | <http://localhost:3000> | Chat, read-only queries, cards, and charts |
-| Optional Ollama | Compose profile `llm` | <http://localhost:11434> | Optional model-assisted SQL or summaries |
+| Component | Default URL | Responsibility |
+|---|---|---|
+| Query application | <http://localhost:3000> | Natural-language/SQL queries and device charts |
+| Q-PRIME dashboard | <http://localhost:3000/qprime> | Configuration, QoC, placements, privacy, sensitivity, performance |
+| Core API | <http://localhost:5005> | Ingestion, paper algorithms, persistence, query routing, metrics |
+| NLP API | <http://localhost:5500> | Natural language to SQL and result summarisation |
+| MongoDB 8 | `localhost:27017` | Persistent edge, fallback Cloud, policies, baselines, decisions, audit |
+| PrestoDB 0.286 | <http://localhost:8080> | SQL over MongoDB and local continuum union |
+| EdgeX 4.0.2 | `localhost:59880–59890` | Real-device integration and event export |
 
-## Stateless paper analysis
+## Quick start
 
-Every caller-supplied record is evaluated in memory:
+Requirements: Docker 24+ with Compose v2.
 
-- **timeliness:** `1 − latency/threshold`;
-- **completeness:** expected schema fields present;
-- **correctness:** type and range checks;
-- **resolution:** score derived from the refresh rate;
-- **significance:** event-content heuristic; and
-- **privacy:** PII detection plus a stream-specific privacy weight.
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
 
-The placement scores are:
+All required services start from this command. MongoDB and EdgeX PostgreSQL data use named volumes and survive container recreation. Ollama is optional:
+
+```bash
+docker compose --profile llm up -d ollama
+```
+
+## Ingestion
+
+Direct producers send one canonical record to `POST /api/ingest`:
+
+```bash
+curl -X POST http://localhost:5005/api/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contextAttribute": "door",
+    "contextValue": {"event": "opened"},
+    "resource": {"device_id": "door-1", "device_name": "Door 1"},
+    "refreshRate": 1000,
+    "timestamp": 1785312000000
+  }'
+```
+
+Real devices use the bundled EdgeX services. EdgeX's `http-export` application service forwards events to `POST /api/ingest/edgex`; both entry points run the same paper pipeline. Record IDs are deterministic and repeated deliveries are idempotent.
+
+## Placement and persistence
+
+The paper scores are:
 
 ```text
 QoC_temporal = mean(timeliness, resolution)
@@ -64,141 +78,73 @@ S_edge  = w_temporal * QoC_temporal + w_privacy * P
 S_cloud = w_content  * QoC_content
 ```
 
-The larger score determines the recommendation; equal scores recommend `Both`. A strict privacy flag can override the calculation and recommend `Edge`.
+MongoDB database `qprime` contains:
 
-Criteria weights can be per-stream, global direct values, or derived from a 3×3 AHP pairwise-comparison matrix. AHP responses include λmax, consistency index, and consistency ratio.
+- `edge_records`: records placed at Edge;
+- `cloud_records`: locally retained Cloud decisions when AWS is absent or a write fails;
+- `placement_decisions`: immutable recommendations, scores, effective profile, and actual backend;
+- `weight_profiles` and `configuration_history`: versioned global/stream/device policy and audit history;
+- `qoc_baselines`: persistent adaptive QoC state; and
+- `query_metrics`: query latency and source evidence.
 
-### Analysis API
+Configuration resolution is `device → stream → global`. The `/qprime` Configuration tab exposes the complete policy JSON, including direct/per-stream/metric/AHP weights, SLA thresholds, correctness rules, required fields, privacy controls, and adaptive-baseline parameters.
+
+## AWS Cloud
+
+Set `AWS_CLOUD_ENABLED=true` plus the variables in `.env.example`. Writes support Firehose or Kinesis; queries use Athena when its database, table, workgroup, and output location are configured. Credentials use the normal AWS environment/provider chain. Do not commit credentials.
+
+## Querying
+
+The logical table is `qprime.continuum`. The core accepts read-only SQL through:
+
+```http
+GET /api/query?query=<SQL>&isCloud=<continuum|false|true>
+```
+
+- `false`: MongoDB `edge_records` through PrestoDB;
+- `true`: Athena when configured, otherwise MongoDB `cloud_records`; and
+- `continuum`: both current sources.
+
+Only one read-only statement targeting the logical table is accepted. Non-aggregate queries receive a server-side row limit.
+
+## Core API
 
 ```text
 GET  /api/health
+POST /api/ingest
+POST /api/ingest/edgex
+POST /api/analyze
+GET  /api/query
 GET  /api/config
 PUT  /api/config
+GET|POST /api/config/profiles
+GET  /api/config/history
 POST /api/config/ahp
-POST /api/analyze
+GET  /api/results/{overview,decisions,qoc,privacy,performance}
+POST /api/results/sensitivity
 ```
-
-Analyze a record using the active configuration:
-
-```bash
-curl -X POST http://localhost:5005/api/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "contextAttribute": "door",
-    "contextValue": {"event": "opened"},
-    "resource": {"device_id": "door-1", "device_name": "Door 1"},
-    "refreshRate": 1000,
-    "timestamp": 1785312000,
-    "privacy_filter": false
-  }'
-```
-
-For request-specific settings without modifying the active defaults, send:
-
-```json
-{
-  "record": {"contextAttribute": "door", "contextValue": {}, "resource": {}},
-  "config": {
-    "weight_mode": "global_direct",
-    "global_criteria_weights": {"temporal": 0.5, "spatial": 0.3, "privacy": 0.2}
-  }
-}
-```
-
-The response contains `qoc`, the complete `analysis` explanation, and the effective `config`. No record is retained after the response.
-
-## External query contract
-
-Set `QUERY_API_URL` to an externally operated HTTP endpoint. The NLP and web services call it with:
-
-```http
-GET <QUERY_API_URL>?query=<url-encoded SQL>&isCloud=<continuum|false|true>&query_timestamp=<milliseconds>
-```
-
-The endpoint must return JSON shaped like:
-
-```json
-{
-  "results": [{"device_name": "Door 1", "event": "opened"}],
-  "edge_count": 1,
-  "cloud_count": 0,
-  "scope": "continuum"
-}
-```
-
-`isCloud=false` requests the edge scope, `isCloud=true` requests the cloud scope, and `isCloud=continuum` requests the combined view. The external implementation owns authentication, SQL execution, source selection, and all data access.
-
-When `QUERY_API_URL` is absent, the UIs return a clear setup-required response and do not attempt a local fallback.
-
-## Quick start
-
-Requirements: Docker 24+ with Compose v2.
-
-```bash
-cp .env.example .env
-# Set QUERY_API_URL in .env when an external source is available.
-docker compose up -d --build
-```
-
-Open:
-
-- query application: <http://localhost:3000>
-- analysis API: <http://localhost:5005/api/health>
-- NLP API: <http://localhost:5500/api/health>
-
-The analysis API and rule-based NLP logic work without an LLM. Data queries require `QUERY_API_URL`.
-
-## Optional local language model
-
-```bash
-docker compose --profile llm up -d ollama
-docker compose --profile llm exec ollama ollama pull qwen2.5:7b-instruct-q4_K_M
-```
-
-Then enable `USE_LLM_SQL=1` and/or `USE_LLM_SUMMARY=1` in `.env`. Both are disabled by default.
-
-## Offline paper reproduction
-
-```bash
-pip install -r services/core/requirements.txt
-python scripts/reproduce_paper.py
-```
-
-The script evaluates representative records entirely in memory and prints the paper configuration's recommendations, AHP priority profiles, and privacy outcomes.
 
 ## Development
 
 ```bash
-pip install -r services/core/requirements.txt -r services/nlp/requirements.txt pytest
+pip install -r services/core/requirements.txt -r services/nlp/requirements.txt
 python services/core/app.py
-
-QUERY_API_URL=http://your-query-service/api/query python services/nlp/app.py
 
 cd services/nlp-web
 npm install
-QUERY_API_URL=http://your-query-service/api/query npm run dev
+npm run dev
 ```
 
 ## Repository layout
 
 ```text
-services/
-├── core/       # stateless paper analysis API and qprime algorithms
-├── nlp/        # natural-language SQL generation and summarisation
-└── nlp-web/    # query and visualisation application
-scripts/        # offline paper-algorithm reproduction
-tests/          # algorithm and NLP tests
-docs/           # architecture and design specifications
+infra/presto/   # PrestoDB MongoDB connector configuration
+services/core/  # paper algorithms, ingestion, placement, persistence and query API
+services/nlp/   # natural-language SQL generation and summarisation
+services/nlp-web/ # query application plus separate /qprime dashboard
+docs/           # design and implementation specifications
 ```
 
-## Citation
+## Citation and license
 
-This repository accompanies:
-
-> K. S. Jagarlamudi et al., “A Quality- and Privacy-Aware Edge–Cloud Continuum Framework for Internet of Things Applications”, IEEE Access (under review), 2026.
-
-See [CITATION.cff](CITATION.cff).
-
-## License
-
-[MIT](LICENSE)
+See [CITATION.cff](CITATION.cff). Licensed under the [MIT License](LICENSE).

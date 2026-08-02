@@ -14,7 +14,7 @@ import { DEFAULT_SCOPE } from "@/lib/sql";
 import { withBasePath } from "@/lib/basePath";
 
 export default function Home() {
-    // combined external data, unless the user filters to one tier
+    // combined continuum data, unless the user filters to one tier
     const [databaseLayer, setDatabaseLayer] = useState(DEFAULT_SCOPE);
     const [dataSourceConfigured, setDataSourceConfigured] = useState(null);
 
@@ -60,8 +60,8 @@ export default function Home() {
 
                         {dataSourceConfigured === false && (
                             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-                                Data source not configured. Set QUERY_API_URL to
-                                connect this application to a read-only query endpoint.
+                                Q-PRIME query service is unavailable. Check the core
+                                service and QUERY_API_URL configuration.
                             </div>
                         )}
 

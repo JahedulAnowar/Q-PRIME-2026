@@ -10,7 +10,7 @@ The application does not contain database or device connectors.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `QUERY_API_URL` | unset | Server-side external query endpoint used by cards and charts |
+| `QUERY_API_URL` | core API in Compose | Server-side Q-PRIME query endpoint used by cards and charts |
 | `LLM_API` | `http://qprime-nlp:5500` | NLP API used by chat requests |
 | `NEXT_PUBLIC_SQL_TABLE_NAME` | `qprime.continuum` | Logical table used in generated chart SQL |
 | `NEXT_PUBLIC_BASE_PATH` | empty | Optional deployment base path |

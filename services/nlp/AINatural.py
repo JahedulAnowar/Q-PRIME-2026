@@ -52,7 +52,7 @@ DEFAULT_ROW_LIMIT = int(os.getenv("NL_ROW_LIMIT", "200"))
 LOCAL_TZ_NAME = os.getenv("LOCAL_TZ_NAME", "Australia/Sydney")
 EPOCH_SCALE = os.getenv("EPOCH_SCALE", "s").lower().strip()
 
-# Logical table exposed by the configured external query API.
+# Logical table exposed by the Q-PRIME query API.
 CONTINUUM_DB = os.getenv("CONTINUUM_DB", "qprime")
 CONTINUUM_TABLE = os.getenv("CONTINUUM_TABLE", "continuum")
 
@@ -141,7 +141,7 @@ def get_scope() -> str:
 
 
 def get_table_fqn() -> str:
-    """The logical table exposed by the external query API."""
+    """The logical table exposed by the Q-PRIME query API."""
     return CONTINUUM_TABLE_FQN
 
 
@@ -1094,7 +1094,9 @@ def try_single_device_template(
             else:
                 event_clause = "\n  AND contextvalue.event IN (" + sql_list(evs) + ")"
 
-    dev_pred = devices_predicate_for(device, alias_hint)
+    # External producers may choose their own door device names. The
+    # canonical stream attribute is the stable contract for every door.
+    dev_pred = "contextattribute = 'door'" if device == "LabDoorSensor" else devices_predicate_for(device, alias_hint)
 
     if wants_count:
         return f"SELECT COUNT(*) AS n\nFROM {get_table_fqn()}\nWHERE {dev_pred}{th}{event_clause};"
@@ -1574,18 +1576,16 @@ def try_special_templates(user: str) -> Optional[str]:
         )
 
     # --- How many door events on <date> ---
-    m = re.search(r"how\s+many\s+door\s+events\s+on\s+(.+)$", t)
+    m = re.search(r"how\s+many\s+door\s+events(?:\s+on)?\s+(.+)$", t)
     if m:
-        dt = dateparser.parse(m.group(1), settings={"PREFER_DATES_FROM": "past"})
-        if dt:
-            s = f"{dt:%Y-%m-%d} 00:00:00"
-            e = f"{(dt + timedelta(days=1)):%Y-%m-%d} 00:00:00"
+        time_range = parse_time_range(m.group(1))
+        if time_range:
             return (
                 f"SELECT COUNT(*) AS door_events\n"
                 f"FROM {get_table_fqn()}\n"
-                f"WHERE {devices_predicate_for('LabDoorSensor')}\n"
-                f"  AND from_unixtime(\"timestamp\") >= TIMESTAMP '{s}'\n"
-                f"  AND from_unixtime(\"timestamp\") <  TIMESTAMP '{e}';"
+                f"WHERE contextattribute = 'door'\n"
+                f"  AND \"timestamp\" >= {time_range['start_epoch']}\n"
+                f"  AND \"timestamp\" <  {time_range['end_epoch']};"
             )
 
     # --- Who was the last person to enter the room? ---
@@ -1604,7 +1604,8 @@ def try_special_templates(user: str) -> Optional[str]:
         r"\bshow me the latest sensor activity\b", t
     ):
         return (
-            f"SELECT *\n"
+            f'SELECT "timestamp", resource.device_id, resource.device_name, '
+            f"contextattribute, contextvalue.event, storage_location\n"
             f"FROM {get_table_fqn()}\n"
             f'ORDER BY "timestamp" DESC\n'
             f"LIMIT 10;"
@@ -1644,7 +1645,8 @@ def try_special_templates(user: str) -> Optional[str]:
         return (
             f"SELECT AVG(contextvalue.temperature) AS avg_temperature_today\n"
             f"FROM {get_table_fqn()}\n"
-            f"WHERE resource.device_name = 'LabTHPSensor'\n"
+            f"WHERE contextattribute = 'thp'\n"
+            f"  AND contextvalue.temperature IS NOT NULL\n"
             f"  AND from_unixtime(\"timestamp\") >= date_trunc('day', now())\n"
             f'  AND from_unixtime("timestamp") <  now();'
         )
@@ -2048,7 +2050,7 @@ def _generate_sql_with_llm(qtext: str, time_hint_local) -> Optional[str]:
 # ---------- CLI runner (optional) ----------
 BANNER = f"""
 ────────────────────────────────────────────────────────────────
- NL → external query SQL (flat schema)  (model: {MODEL})
+ NL → Q-PRIME query SQL (flat schema)  (model: {MODEL})
  Dataset: {get_table_fqn()}   Local TZ: {LOCAL_TZ_NAME}   Epoch scale: {EPOCH_SCALE}
  Type a query (e.g., "latest misty", "faces near door within 2m last week").  'exit' to quit.
 ────────────────────────────────────────────────────────────────

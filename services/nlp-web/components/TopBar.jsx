@@ -63,11 +63,16 @@ const TopBar = () => {
                             SDC Lab WSU
                         </div>
                     </div>
-                    <div className="flex ml-4 md:ml-0">
+                    <div className="flex gap-2 ml-4 md:ml-0">
                         <SidebarTrigger className="hidden md:block hover:cursor-pointer py-2" />
                         <Button asChild className="md:hidden">
                             <Link href="/queries" className="font-semibold">
                                 Queries
+                            </Link>
+                        </Button>
+                        <Button asChild variant="outline" className="md:hidden">
+                            <Link href="/qprime" className="font-semibold">
+                                Q-PRIME Dashboard
                             </Link>
                         </Button>
                     </div>
@@ -92,6 +97,11 @@ const TopBar = () => {
                     <Button asChild className="md:block hidden">
                         <Link href="/queries" className="font-semibold">
                             Queries
+                        </Link>
+                    </Button>
+                    <Button asChild variant="outline" className="md:block hidden">
+                        <Link href="/qprime" className="font-semibold">
+                            Q-PRIME Dashboard
                         </Link>
                     </Button>
                     {/* <Select
