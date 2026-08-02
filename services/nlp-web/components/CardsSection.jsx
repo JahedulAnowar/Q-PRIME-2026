@@ -1,0 +1,99 @@
+"use client";
+
+import React from "react";
+
+import { useDoorData } from "@/hooks/useDoorData";
+import { useSmokeData } from "@/hooks/useSmokeData";
+import { useDeviceCount } from "@/hooks/useSensorData";
+import { useIntruderCount } from "@/hooks/useMistyData";
+import { useMoistureData } from "@/hooks/useMoistureData";
+
+import CloudCards from "@/components/CloudCards";
+import EdgeCards from "@/components/EdgeCards";
+import { useTHPData } from "@/hooks/useTHPData";
+import { parseTHPContext } from "@/lib/utils";
+
+export default function CardsSection({ databaseLayer }) {
+    // Moisture data
+    let moistureData = { data: [{ soil_condition: "-" }] };
+    const soil_condition = moistureData["data"][0]?.soil_condition;
+    // moistureData = useMoistureData(1, databaseLayer);
+    // const soil_condition = moistureData["data"][0]?.event;
+    // console.log("Soil Condition: ", soil_condition);
+
+    // Intruder Count
+    // const intruderCount = -1; // Placeholder value
+    const { intruderCount } = useIntruderCount({
+        timeRange: 1,
+        databaseLayer: databaseLayer,
+    }); // Last 1 hour
+    //const { intruderCount, loading, error, refresh } = useIntruderCount(1, 30000); Refresh every 30 seconds (30000 ms)
+    // console.log("Intruder Count: ", intruderCount);
+
+    // Sensor count
+    //const sensorCount = -1; // Placeholder value
+    // const { uniqueDevices: sensorCount } = useDeviceCount();
+
+    // Smoke Sensor Data
+    let smokeEventCount = -1; // Placeholder value
+    // ({ smokeEventCount } = useSmokeData({
+    //     hours: 1,
+    //     databaseLayer: databaseLayer,
+    // }));
+    // const smokeEventCount = smokeData["data"].length;
+    // console.log("Smoke Event Count: ", smokeEventCount);
+
+    // Door Sensor Data
+    let doorEventCount = -1; // Placeholder value
+    ({ doorEventCount } = useDoorData({
+        hours: 1,
+        databaseLayer: databaseLayer,
+    }));
+    // const doorEventCount = smokeData["data"].length;
+    // console.log("Door Event Count: ", doorEventCount);
+
+    let thp_temp = -1;
+    let thp_humidity = -1;
+    let thp_pressure = -1;
+
+    let thp_data = null;
+    ({ data: thp_data } = useTHPData({
+        hours: 1,
+        databaseLayer: databaseLayer,
+    }));
+
+    // console.log("THP Data Fetched:", thp_data);
+    const firstThp = thp_data?.[0];
+    // console.log("THP Data (first record):", firstThp);
+    thp_temp = firstThp?.contextvalue?.temperature;
+    thp_humidity = firstThp?.contextvalue?.humidity;
+    thp_pressure = firstThp?.contextvalue?.pressure;
+    // console.log("Parsed THP:", { thp_temp, thp_humidity, thp_pressure });
+
+    return (
+        <div className="">
+            {/* <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4"> */}
+
+            {databaseLayer === "edge" ? (
+                <EdgeCards
+                    soilCondition={soil_condition}
+                    intruderCount={intruderCount}
+                    doorEventCount={doorEventCount}
+                    thpTemp={thp_temp}
+                    thpHumidity={thp_humidity}
+                    thpPressure={thp_pressure}
+                />
+            ) : (
+                <CloudCards
+                    soilCondition={soil_condition}
+                    intruderCount={intruderCount}
+                    smokeEventCount={smokeEventCount}
+                    doorEventCount={doorEventCount}
+                    thpTemp={thp_temp}
+                    thpHumidity={thp_humidity}
+                    thpPressure={thp_pressure}
+                />
+            )}
+        </div>
+    );
+}

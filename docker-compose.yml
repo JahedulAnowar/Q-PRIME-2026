@@ -1,0 +1,73 @@
+name: qprime
+
+services:
+  qprime-analysis:
+    container_name: qprime-analysis
+    build: ./services/core
+    environment:
+      QPRIME_ANALYSIS_PORT: "5005"
+    ports:
+      - "5005:5005"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:5005/api/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qprime-nlp:
+    container_name: qprime-nlp
+    build: ./services/nlp
+    environment:
+      QUERY_API_URL: ${QUERY_API_URL:-}
+      CONTINUUM_DB: ${CONTINUUM_DB:-qprime}
+      CONTINUUM_TABLE: ${CONTINUUM_TABLE:-continuum}
+      EPOCH_SCALE: ${EPOCH_SCALE:-s}
+      LOCAL_TZ_NAME: ${LOCAL_TZ_NAME:-Australia/Sydney}
+      USE_LLM_SQL: ${USE_LLM_SQL:-}
+      USE_LLM_SUMMARY: ${USE_LLM_SUMMARY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      MODEL: ${MODEL:-qwen2.5:7b-instruct-q4_K_M}
+    ports:
+      - "5500:5500"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:5500/api/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qprime-query:
+    container_name: qprime-query
+    build:
+      context: ./services/nlp-web
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
+        NEXT_PUBLIC_SQL_TABLE_NAME: ${NEXT_PUBLIC_SQL_TABLE_NAME:-qprime.continuum}
+    depends_on:
+      qprime-nlp:
+        condition: service_healthy
+    environment:
+      LLM_API: http://qprime-nlp:5500
+      QUERY_API_URL: ${QUERY_API_URL:-}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    container_name: qprime-ollama
+    image: ollama/ollama:latest
+    profiles: [llm]
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:
