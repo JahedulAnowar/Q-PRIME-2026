@@ -313,13 +313,13 @@ def build_catalogue():
     return catalogue
 
 
-def _degrade(value):
+def _degrade(value, mode=None):
     """Drop a field or push one out of range, to vary completeness/correctness."""
     keys = [key for key in value if key not in ("event",)]
     if not keys:
         return value
     victim = random.choice(keys)
-    if random.random() < 0.5:
+    if mode == "drop" or (mode is None and random.random() < 0.5):
         value.pop(victim, None)
     elif isinstance(value.get(victim), (int, float)) and not isinstance(value[victim], bool):
         value[victim] = -abs(value[victim]) * 10
@@ -328,22 +328,31 @@ def _degrade(value):
     return value
 
 
-def make_record(device, degraded_pct=0.08):
+def make_record(device, degraded_pct=0.08, overrides=None):
     """Return one canonical Q-PRIME record for ``device``."""
-    heartbeat = random.random() < device.get("heartbeat_pct", 0.15)
+    overrides = overrides or {}
+    heartbeat_pct = max(0, min(1, float(overrides.get("low_significance_pct", device.get("heartbeat_pct", 0.15)))))
+    heartbeat = random.random() < heartbeat_pct
     value = device["builder"](heartbeat)
-    if random.random() < degraded_pct:
+    drop_pct = max(0, min(1, float(overrides.get("drop_field_pct", 0))))
+    corrupt_pct = max(0, min(1, float(overrides.get("corrupt_pct", 0))))
+    if random.random() < drop_pct:
+        value = _degrade(value, "drop")
+    elif random.random() < corrupt_pct:
+        value = _degrade(value, "corrupt")
+    elif random.random() < degraded_pct:
         value = _degrade(value)
 
     # Backdate the reading so the timeliness factor sees a realistic delay.
-    latency_ms = max(0, random.gauss(device["latency_spread_ms"], device["latency_spread_ms"] / 3))
+    base_latency = max(0, float(device["latency_spread_ms"]) + float(overrides.get("extra_latency_ms", 0)))
+    latency_ms = max(0, random.gauss(base_latency, max(base_latency / 3, 1)))
     record = {
         # Structured, so the schemas' entity.gateway_id / entity.location paths
         # contribute to the completeness factor.
         "entity": {"gateway_id": device["gateway_id"], "location": device["location"]},
         "contextAttribute": device["stream"],
         "contextValue": value,
-        "refreshRate": device["refresh_rate"],
+        "refreshRate": max(1, int(overrides.get("refresh_rate_ms", device["refresh_rate"]))),
         "timestamp": int(time.time() * 1000 - latency_ms),
         "resource": {
             "device_id": device["device_id"],
@@ -353,7 +362,7 @@ def make_record(device, degraded_pct=0.08):
             "ip_address": device["ip_address"],
         },
         "sla": None,
-        "privacy_filter": device.get("privacy_filter", False),
+        "privacy_filter": overrides.get("privacy_filter", device.get("privacy_filter", False)),
     }
     # The core derives a content hash for idempotency; a per-record nonce keeps
     # bursts within the same second from collapsing into duplicates.

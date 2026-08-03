@@ -19,9 +19,10 @@ cd Q-PRIME-2026
 docker compose up -d --build
 ```
 
-Then open **<http://localhost:3000/qprime>**. No `.env`, no configuration, no
-manual data loading — a bundled ten-device feed starts producing records
-immediately, so the dashboards are populated within seconds of the stack coming up.
+Then open **<http://localhost:3000/qprime>**. No `.env` is required. The stack
+starts with generated data **off**; select Simulator or Sample EdgeX Feed in the
+dashboard when you want demonstration records, or connect real devices through
+EdgeX instead.
 
 ---
 
@@ -105,11 +106,17 @@ testbed reports either; every other tile is live.
 
 ---
 
-## What the first run produces
+## Generated demonstration data
 
-Measured on a clean stack (`docker compose down -v` then `docker compose up -d --build`)
-driven only by the bundled feed. Your numbers will differ — the feed is
-randomised — but the shape is reproducible.
+The **Data Sources** tab offers two mutually exclusive, user-started modes.
+Simulator sends selected, configurable sensors directly to Q-PRIME. Sample
+EdgeX Feed provisions the paper testbed in EdgeX and routes all generated
+events through EdgeX's export service. Both modes are Off after startup and
+after restart; existing MongoDB records are retained.
+
+The figures below are an earlier sample run of the paper testbed after it was
+explicitly started. They are illustrative, not data produced automatically by a
+fresh deployment.
 
 | Measure | Result |
 |---|---|
@@ -132,12 +139,9 @@ mitigation on top of the same content-only weights returns that to **0**. The
 privacy term is doing real work, and the explorer lets you demonstrate it in one
 click.
 
-> **On the bundled feed.** `qprime-devices` generates synthetic readings for the
-> paper's ten-device testbed so the stack is demonstrable without lab hardware.
-> The decision engine, QoC scoring, privacy analysis and placement it drives are
-> the real implementation — only the device readings are generated. Stop it with
-> `docker compose stop qprime-devices` to run against real traffic only. See
-> [services/devices/README.md](services/devices/README.md).
+> **On generated modes.** The decision engine, QoC scoring, privacy analysis and
+> placement are the real implementation — only the chosen device readings are
+> generated. See [services/devices/README.md](services/devices/README.md).
 
 ---
 
@@ -150,7 +154,7 @@ docker compose up -d --build
 ```
 
 That is the whole setup. `.env` is optional and only needed for host-port
-remapping, tuning the bundled feed, or the optional local LLM — see
+remapping, tuning the Sample EdgeX Feed, or the optional local LLM — see
 [.env.example](.env.example). AWS is configured from the dashboard, not from a
 file.
 
@@ -167,6 +171,7 @@ so expect several minutes. Once images are cached the command returns in about
 | PrestoDB | <http://localhost:8085> | SQL over MongoDB and the continuum union |
 | MongoDB 8 | `localhost:27017` | Edge records, cloud fallback, policies, decisions, audit |
 | EdgeX 4.0.2 | `localhost:59880–59890` | Real-device integration and event export |
+| EdgeX Console | <http://localhost:4000> | Device, profile, service and event management |
 
 Common operations:
 
@@ -184,8 +189,8 @@ docker compose down -v       # stop and delete all stored data
 ## Architecture
 
 ```text
-raw data record ─────────────────┐
-                                 ├─> Q-PRIME ingestion
+Simulator (when started) ────────┐
+Sample EdgeX Feed (when started) ├─> Q-PRIME ingestion
 real device -> EdgeX -> export ──┘       -> QoC + privacy evaluation
                                          -> profile weights / AHP
                                          -> Edge | Cloud | Both decision

@@ -124,6 +124,7 @@ class MongoRepository:
         )
         self.db.configuration_history.create_index([("created_at", DESCENDING)])
         self.db.cloud_configuration.create_index([("updated_at", DESCENDING)])
+        self.db.producer_configuration.create_index([("updated_at", DESCENDING)])
         self.db.qoc_baselines.create_index("baseline_key", unique=True)
         self.db.query_metrics.create_index([("created_at", DESCENDING)])
         self._ensure_presto_schema()
@@ -246,6 +247,17 @@ class MongoRepository:
         payload["_id"] = "active"
         self.db.cloud_configuration.replace_one({"_id": "active"}, payload, upsert=True)
         self.db.configuration_history.insert_one(copy.deepcopy(audit))
+        return json_safe(payload)
+
+    def producer_configuration(self) -> Optional[Dict[str, Any]]:
+        document = self.db.producer_configuration.find_one({"_id": "active"})
+        return json_safe(document) if document else None
+
+    def save_producer_configuration(self, document: Dict[str, Any]) -> Dict[str, Any]:
+        payload = copy.deepcopy(document)
+        payload.pop("_id", None)
+        payload.update({"_id": "active", "updated_at": utc_ms()})
+        self.db.producer_configuration.replace_one({"_id": "active"}, payload, upsert=True)
         return json_safe(payload)
 
     def get_baseline(self, baseline_key: str) -> Optional[Dict[str, Any]]:

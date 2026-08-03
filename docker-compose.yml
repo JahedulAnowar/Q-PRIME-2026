@@ -216,6 +216,7 @@ services:
       MONGODB_DATABASE: ${MONGODB_DATABASE:-qprime}
       PRESTO_URL: http://presto:8080
       EDGEX_METADATA_URL: http://edgex-core-metadata:59881
+      QPRIME_PRODUCER_URL: http://qprime-devices:5010
       QPRIME_CONFIG_KEY_PATH: /var/lib/qprime/secrets/aws-config.key
     ports:
       - "${QPRIME_ANALYSIS_PORT:-5005}:5005"
@@ -255,9 +256,23 @@ services:
     ports:
       - "127.0.0.1:${EDGEX_QPRIME_EXPORT_PORT:-59704}:59704"
 
-  # Synthetic feed from the paper's ten-device testbed. It exists so the stack
-  # shows real placement results immediately; the decision engine it drives is
-  # the actual implementation. See services/devices/README.md.
+  # Official EdgeX management console.
+  edgex-ui:
+    <<: *edgex-common
+    image: edgexfoundry/edgex-ui:4.0.2
+    container_name: qprime-edgex-ui
+    hostname: edgex-ui
+    depends_on:
+      edgex-core-metadata:
+        condition: service_started
+    environment:
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      SERVICE_HOST: edgex-ui
+    ports:
+      - "127.0.0.1:${EDGEX_UI_PORT:-4000}:4000"
+
+  # User-controlled Simulator and Sample EdgeX feed. It starts idle, so the
+  # stack never generates data until a user starts exactly one mode in /qprime.
   qprime-devices:
     container_name: qprime-devices
     build: ./services/devices
@@ -269,15 +284,7 @@ services:
       QPRIME_CORE_URL: http://qprime-analysis:5005
       EDGEX_METADATA_URL: http://edgex-core-metadata:59881
       EDGEX_DEVICE_REST_URL: http://edgex-device-rest:59986
-      # `both` alternates direct ingestion with the full EdgeX export path, so
-      # one command exercises the whole topology. Falls back to direct if EdgeX
-      # is unavailable.
-      QPRIME_DEVICES_TRANSPORT: ${QPRIME_DEVICES_TRANSPORT:-both}
-      QPRIME_DEVICES_RATE_PER_MIN: ${QPRIME_DEVICES_RATE_PER_MIN:-240}
-      QPRIME_DEVICES_INITIAL_BURST: ${QPRIME_DEVICES_INITIAL_BURST:-400}
-      QPRIME_DEVICES_DEGRADED_PCT: ${QPRIME_DEVICES_DEGRADED_PCT:-0.08}
-      QPRIME_DEVICES_MAX_RECORDS: ${QPRIME_DEVICES_MAX_RECORDS:-0}
-      QPRIME_DEVICES_SEED: ${QPRIME_DEVICES_SEED:-}
+      QPRIME_SAMPLE_RATE_PER_MIN: ${QPRIME_SAMPLE_RATE_PER_MIN:-60}
     restart: unless-stopped
 
   qprime-nlp:
@@ -320,6 +327,8 @@ services:
         condition: service_healthy
       qprime-nlp:
         condition: service_healthy
+      qprime-devices:
+        condition: service_started
     networks: [qprime]
     environment:
       LLM_API: http://qprime-nlp:5500

@@ -1,18 +1,23 @@
-# Bundled device feed
+# Q-PRIME generated data controller
 
-`qprime-devices` streams synthetic records from the paper's ten-device testbed
-into the core pipeline, so a plain `docker compose up -d --build` produces a
-populated dashboard with no manual ingestion. It uses only the Python standard
-library, so it has no `requirements.txt`.
+`qprime-devices` is an idle controller for the paper's ten-device testbed. It
+does **not** generate records when Compose starts. In the Q-PRIME dashboard's
+**Data Sources** tab, users choose exactly one generated mode:
 
-It is a **demonstration feed, not part of the framework**. The decision engine,
-the QoC scoring and the placement algorithm it exercises are the real
-implementation; only the device readings are generated. Disable it whenever you
-want the stack to carry real traffic only:
+- **Simulator** — select sensors and configure their interval, refresh rate,
+  added latency, degraded-record percentage, low-significance percentage and
+  privacy filter. Records are posted directly to `/api/ingest`.
+- **Sample EdgeX Feed** — provision the whole testbed in EdgeX and submit each
+  reading through device-rest and the HTTP-export pipeline.
 
-```bash
-docker compose stop qprime-devices     # leave the rest of the stack running
-```
+Starting either mode stops the other. Stop generation from the same tab; do not
+stop the controller container, because the dashboard uses it for configuration
+and status. The last simulator configuration persists in MongoDB, but a
+running workload is never resumed after Docker restarts.
+
+It is a **demonstration input, not a replacement for a real device service**.
+The decision engine, QoC scoring and placement algorithm it exercises are the
+real implementation; only the selected device readings are generated.
 
 ## Devices
 
@@ -41,26 +46,19 @@ out-of-range field) to exercise completeness, and every stream emits periodic
 `heartbeat` events to exercise significance. Correctness stays at 1.0 unless you
 configure `correctness_rules` — see [documents/METRICS.md](../../documents/METRICS.md).
 
-## Configuration
+## Container configuration
 
 | Variable | Default | Effect |
 |---|---|---|
 | `QPRIME_CORE_URL` | `http://qprime-analysis:5005` | Core ingestion endpoint |
-| `QPRIME_DEVICES_TRANSPORT` | `both` | `both`, `direct`, or `edgex` |
-| `QPRIME_DEVICES_RATE_PER_MIN` | `240` | Steady-state records per minute |
-| `QPRIME_DEVICES_INITIAL_BURST` | `400` | Records sent at full speed on startup |
-| `QPRIME_DEVICES_DEGRADED_PCT` | `0.08` | Fraction of records emitted degraded |
-| `QPRIME_DEVICES_MAX_RECORDS` | `0` | Stop after N records (`0` runs forever) |
-| `QPRIME_DEVICES_SEED` | *(unset)* | Fix the RNG seed for repeatable runs |
+| `QPRIME_SAMPLE_RATE_PER_MIN` | `60` | Sample EdgeX Feed records per minute |
 
-## Transports
+## EdgeX route
 
-`direct` posts canonical records to `POST /api/ingest`.
-
-`edgex` registers one REST device profile per stream and one EdgeX device per
-simulated device in core-metadata, then pushes each reading to `device-rest`, so
-records travel the full device → EdgeX core-data → `app-service-configurable`
-HTTP export → `POST /api/ingest/edgex` path.
+The Sample EdgeX Feed registers one REST device profile per stream and one
+EdgeX device per simulated device in core-metadata, then pushes each reading to
+`device-rest`, so records travel the full device → EdgeX core-data →
+`app-service-configurable` HTTP export → `POST /api/ingest/edgex` path.
 
 The canonical Q-PRIME metadata (`contextAttribute`, `refreshRate`,
 `privacy_filter`, `device_id`, `gateway_id`) travels as EdgeX **device tags**,
@@ -68,14 +66,12 @@ which core-data copies onto every event and `normalize_edgex` reads back out.
 Records arriving through EdgeX are therefore scored identically to direct
 ones — including the drone's `privacy_filter: strict` edge pin.
 
-`both` (the default) alternates the two, so one `docker compose up` exercises
-the entire topology. Filter by entry point in the Decisions tab, or via the API:
+Filter results by entry point in the Decisions tab, or via the API:
 
 ```bash
 curl 'http://localhost:5005/api/results/decisions?source=edgex&limit=5'
 curl 'http://localhost:5005/api/results/decisions?source=direct&limit=5'
 ```
 
-If EdgeX is unreachable at startup, or stops accepting readings mid-run, the
-feed logs a warning and falls back to `direct` so the dashboards keep
-populating.
+If EdgeX is unavailable, Sample EdgeX Feed stops and reports the reason; it
+never silently falls back to direct ingestion.
