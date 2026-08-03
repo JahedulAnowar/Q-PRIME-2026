@@ -86,6 +86,23 @@ class AwsCloudAdapter:
                 kwargs["aws_session_token"] = self.session_token
         return boto3.client(service, **kwargs)
 
+    @staticmethod
+    def _athena_value(value: Optional[str], column_type: str) -> Any:
+        """Convert Athena's string result cells to JSON-native scalar values."""
+        if value is None:
+            return None
+        kind = str(column_type or "").lower()
+        try:
+            if kind in {"tinyint", "smallint", "integer", "int", "bigint"}:
+                return int(value)
+            if kind.startswith(("decimal", "double", "real", "float")):
+                return float(value)
+            if kind == "boolean":
+                return value.strip().lower() == "true"
+        except ValueError:
+            return value
+        return value
+
     def configured(self) -> bool:
         if not self.enabled or not self.region:
             return False
@@ -189,13 +206,25 @@ class AwsCloudAdapter:
 
         paginator = client.get_paginator("get_query_results")
         rows: List[List[Optional[str]]] = []
+        column_types: List[str] = []
         for page in paginator.paginate(QueryExecutionId=execution_id):
+            if not column_types:
+                column_types = [
+                    str(column.get("Type") or "")
+                    for column in page["ResultSet"].get("ResultSetMetadata", {}).get("ColumnInfo", [])
+                ]
             for row in page["ResultSet"].get("Rows", []):
                 rows.append([cell.get("VarCharValue") for cell in row.get("Data", [])])
         if not rows:
             return []
         headers = [str(value or "") for value in rows[0]]
-        return [dict(zip(headers, values)) for values in rows[1:]]
+        return [
+            {
+                header: self._athena_value(value, column_types[index] if index < len(column_types) else "")
+                for index, (header, value) in enumerate(zip(headers, values))
+            }
+            for values in rows[1:]
+        ]
 
 
 cloud_adapter = AwsCloudAdapter()

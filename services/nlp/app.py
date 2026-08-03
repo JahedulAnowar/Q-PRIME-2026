@@ -241,11 +241,31 @@ def aggregate_summary(rows: List[Dict[str, Any]], question: str) -> Optional[Dic
                 text = f"{count:,} {noun}."
             return {"ok": True, "text": text, "meta": {"aggregate": True}}
 
-    value = row.get("avg_temperature_today")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    for key, value in row.items():
+        if not key.startswith(("avg_", "average_", "mean_")):
+            continue
+        metric = key.split("_", 1)[1].replace("_", " ") or "value"
+        if metric.endswith(" today"):
+            metric = metric[:-6]
+            period = " today"
+        elif "yesterday" in question_lower:
+            period = " yesterday"
+        elif "today" in question_lower:
+            period = " today"
+        else:
+            period = ""
+        if value is None:
+            return {
+                "ok": True,
+                "text": f"No {metric} readings were found{period}.",
+                "meta": {"aggregate": True, "empty": True},
+            }
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        units = {"temperature": "\N{DEGREE SIGN}C", "humidity": "%", "pressure": " hPa"}
         return {
             "ok": True,
-            "text": f"Average temperature today is {float(value):.1f}\N{DEGREE SIGN}C.",
+            "text": f"Average {metric}{period} is {float(value):.1f}{units.get(metric, '')}.",
             "meta": {"aggregate": True},
         }
     return None

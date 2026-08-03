@@ -58,6 +58,13 @@ Profiles can be scoped globally, to one supported stream, or to one device.
 Every save creates a new immutable MongoDB-backed profile version. Existing
 records and decisions are not recalculated or moved.
 
+## Query sources
+
+The query application offers **Edge**, **Cloud**, and **Continuum** scopes.
+Edge reads MongoDB through PrestoDB. Cloud reads Athena when AWS Cloud is
+active, otherwise the local MongoDB Cloud-fallback collection. Continuum reads
+both current sources.
+
 ## Sensitivity
 
 Sensitivity replay evaluates the stored decision log under temporary temporal,

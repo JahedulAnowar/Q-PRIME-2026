@@ -78,9 +78,12 @@ class QueryRouter:
             edge_rows, cloud_rows = 0, len(results)
             sources = ["presto:mongodb.cloud_records"]
         elif self.cloud.athena_configured():
-            edge_results = self._presto(self._rewrite(expression, "edge_records"))
-            cloud_results = self.cloud.query(self._athena_sql(expression))
-            results = self._merge_external(expression, edge_results, cloud_results)
+            if any(expression.find(kind) for kind in (exp.Avg,)):
+                edge_results, cloud_results, results = self._federated_average(expression)
+            else:
+                edge_results = self._presto(self._rewrite(expression, "edge_records"))
+                cloud_results = self.cloud.query(self._athena_sql(expression))
+                results = self._merge_external(expression, edge_results, cloud_results)
             edge_rows, cloud_rows = len(edge_results), len(cloud_results)
             sources = ["presto:mongodb.edge_records", "athena"]
             source = "federated"
@@ -181,8 +184,12 @@ class QueryRouter:
 
     def _athena_sql(self, expression: exp.Expression) -> str:
         rewritten = expression.copy()
-        physical = exp.to_table(
-            f"{self.cloud.athena_database}.{self.cloud.athena_table}"
+        # AWS Glue database names may contain characters (for example `-`)
+        # that are not valid in an unquoted SQL identifier. Build the AST from
+        # quoted identifier nodes instead of parsing a dotted string.
+        physical = exp.Table(
+            this=exp.to_identifier(self.cloud.athena_table, quoted=True),
+            db=exp.to_identifier(self.cloud.athena_database, quoted=True),
         )
         for table in list(rewritten.find_all(exp.Table)):
             if self._is_logical(table):
@@ -209,6 +216,43 @@ class QueryRouter:
         columns = [description[0] for description in cursor.description or []]
         return [dict(zip(columns, row)) for row in rows]
 
+    def _federated_average(
+        self, expression: exp.Expression
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Compute a correct weighted average over separate Edge and AWS data."""
+        averages = list(expression.find_all(exp.Avg))
+        if (
+            len(averages) != 1
+            or not isinstance(expression, exp.Select)
+            or len(expression.expressions) != 1
+            or expression.args.get("group") is not None
+        ):
+            raise QueryValidationError(
+                "Continuum currently supports one ungrouped AVG expression at a time"
+            )
+        average = averages[0]
+        value_expression = average.this.copy()
+        statistics = expression.copy()
+        statistics.set(
+            "expressions",
+            [
+                exp.alias_(exp.Sum(this=value_expression.copy()), "__qprime_sum", quoted=True),
+                exp.alias_(exp.Count(this=value_expression.copy()), "__qprime_count", quoted=True),
+            ],
+        )
+        edge_rows = self._presto(self._rewrite(statistics, "edge_records"))
+        cloud_rows = self.cloud.query(self._athena_sql(statistics))
+
+        def numeric(rows: List[Dict[str, Any]], key: str) -> float:
+            if not rows or rows[0].get(key) is None:
+                return 0.0
+            return float(rows[0][key])
+
+        total = numeric(edge_rows, "__qprime_sum") + numeric(cloud_rows, "__qprime_sum")
+        count = numeric(edge_rows, "__qprime_count") + numeric(cloud_rows, "__qprime_count")
+        alias = expression.expressions[0].alias_or_name or "average"
+        return edge_rows, cloud_rows, [{alias: total / count if count else None}]
+
     def _merge_external(
         self,
         expression: exp.Expression,
@@ -228,9 +272,7 @@ class QueryRouter:
             return merged[:QUERY_MAX_ROWS]
 
         if any(isinstance(item, exp.Avg) for item in aggregates):
-            raise QueryValidationError(
-                "AVG across external Edge/Cloud sources requires an explicit SUM and COUNT query"
-            )
+            raise QueryValidationError("unsupported federated AVG query shape")
         if any(
             isinstance(item, exp.Count) and isinstance(item.this, exp.Distinct)
             for item in aggregates

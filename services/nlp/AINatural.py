@@ -1256,6 +1256,19 @@ def try_temperature_template(user: str) -> Optional[str]:
     # default window
     n, unit = 1, "hour"
 
+    # A calendar day is not the same as the previous 24 hours. Keep this
+    # explicit so "average temperature yesterday" does not fall through to
+    # the one-hour default window below.
+    if avg_temp and re.search(r"\byesterday\b", t):
+        return (
+            f"SELECT AVG(contextvalue.temperature) AS avg_temperature\n"
+            f"FROM {get_table_fqn()}\n"
+            f"WHERE resource.device_name = 'LabTHPSensor'\n"
+            f"  AND contextattribute = 'thp'\n"
+            f'  AND from_unixtime("timestamp") >= date_add(\'day\', -1, date_trunc(\'day\', now()))\n'
+            f'  AND from_unixtime("timestamp") <  date_trunc(\'day\', now());'
+        )
+
     m_h = re.search(r"\b(last|past)\s+(\d+)\s+hours?\b", t)
     m_d = re.search(r"\b(last|past)\s+(\d+)\s+days?\b", t)
     m_w = re.search(

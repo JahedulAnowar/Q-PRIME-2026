@@ -84,14 +84,17 @@ MongoDB database `qprime` contains:
 - `cloud_records`: locally retained Cloud decisions when AWS is absent or a write fails;
 - `placement_decisions`: immutable recommendations, scores, effective profile, and actual backend;
 - `weight_profiles` and `configuration_history`: versioned global/stream/device policy and audit history;
+- `cloud_configuration`: active AWS settings and encrypted static credentials;
 - `qoc_baselines`: persistent adaptive QoC state; and
 - `query_metrics`: query latency and source evidence.
 
-Configuration resolution is `device → stream → global`. The `/qprime` Configuration tab exposes the complete policy JSON, including direct/per-stream/metric/AHP weights, SLA thresholds, correctness rules, required fields, privacy controls, and adaptive-baseline parameters.
+Configuration resolution is `device → stream → global`. The `/qprime` Configuration tab provides structured controls for per-stream and global direct weights, plus the three-criterion AHP pairwise matrix. Saving a profile activates it for future records; it does not move or recompute existing records.
 
 ## AWS Cloud
 
-Set `AWS_CLOUD_ENABLED=true` plus the variables in `.env.example`. Writes support Firehose or Kinesis; queries use Athena when its database, table, workgroup, and output location are configured. Credentials use the normal AWS environment/provider chain. Do not commit credentials.
+Configure AWS from **Q-PRIME Dashboard → Configuration → AWS Cloud storage**. The form persists the region, Firehose or Kinesis delivery stream, and optional Athena database/table/workgroup/output location in MongoDB. Static access keys, secret keys, and optional session tokens are encrypted before persistence and are write-only in the UI and API.
+
+The Compose stack stores the encryption key in its `qprime-core-secrets` named volume. Keep this volume together with MongoDB data across restarts; deleting it makes existing encrypted credentials unreadable and requires entering them again. AWS environment variables remain a legacy fallback only when no dashboard configuration has been saved.
 
 ## Querying
 
@@ -102,10 +105,10 @@ GET /api/query?query=<SQL>&isCloud=<continuum|false|true>
 ```
 
 - `false`: MongoDB `edge_records` through PrestoDB;
-- `true`: Athena when configured, otherwise MongoDB `cloud_records`; and
-- `continuum`: both current sources.
+- `true`: configured Athena database/table when AWS Cloud is enabled, otherwise MongoDB `cloud_records`; and
+- `continuum`: Edge MongoDB plus the active Cloud source (Athena when enabled, otherwise local MongoDB fallback).
 
-Only one read-only statement targeting the logical table is accepted. Non-aggregate queries receive a server-side row limit.
+Only one read-only statement targeting the logical table is accepted. Non-aggregate queries receive a server-side row limit. For an active Athena Cloud source, Cloud SQL is rewritten internally from `qprime.continuum` to the configured Athena database/table. A single ungrouped `AVG(...)` Continuum query is combined correctly as a weighted average from each tier's `SUM` and `COUNT`; grouped or multi-average Continuum queries are not currently supported.
 
 ## Core API
 
@@ -120,6 +123,8 @@ PUT  /api/config
 GET|POST /api/config/profiles
 GET  /api/config/history
 POST /api/config/ahp
+GET|PUT /api/cloud/config
+POST /api/cloud/config/probe
 GET  /api/results/{overview,decisions,qoc,privacy,performance}
 POST /api/results/sensitivity
 ```
