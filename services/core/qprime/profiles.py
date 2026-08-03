@@ -5,6 +5,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
+from pymongo.errors import DuplicateKeyError
+
 from .config import RuntimeConfig, runtime_config
 from .repository import MongoRepository, repository
 
@@ -59,7 +61,15 @@ class PersistentConfig:
             "actor": "system",
             "reason": "initial paper configuration",
         }
-        return self.repository.activate_profile(profile, audit)
+        try:
+            return self.repository.activate_profile(profile, audit)
+        except DuplicateKeyError:
+            # Another request seeded the defaults first, or a previous run left
+            # this version inactive. Adopt it instead of failing the ingest.
+            adopted = self.repository.adopt_profile("global", "", profile["version"])
+            if adopted:
+                return adopted
+            raise
 
     def snapshot(self) -> Dict[str, Any]:
         self.ensure_seeded()

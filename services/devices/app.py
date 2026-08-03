@@ -172,6 +172,7 @@ def _edgex_device(device):
                 "device_id": device["device_id"],
                 "device_name": device["device_name"],
                 "gateway_id": device["gateway_id"],
+                "location": device["location"],
                 "entity": device["gateway_id"],
             },
         },

@@ -22,6 +22,7 @@ import time
 import uuid
 
 GATEWAYS = ("edge-node-1", "edge-node-2", "edge-node-3", "edge-node-4")
+LOCATIONS = ("sdc-lab", "sdc-atrium", "sdc-loading-bay", "sdc-greenhouse")
 
 FIRST_NAMES = (
     "Arthur", "Alice", "Priya", "Marcus", "Lena", "Tomas", "Nadia", "Rohan",
@@ -86,9 +87,11 @@ def thp_value(heartbeat):
 
 
 def soil_value(heartbeat):
+    # `moisture_pct` is the canonical name in repository.RECORD_FIELDS, so it is
+    # the one the SQL surface and the sensor dashboard can actually read.
     return {
         "event": "heartbeat" if heartbeat else "moisture_reading",
-        "moisture": _drift(41, 11, 0, 100),
+        "moisture_pct": _drift(41, 11, 0, 100),
         "soil_temperature": _drift(19, 3),
         "conductivity_us_cm": _drift(820, 90, 0),
         "battery": _drift(84, 7, 0, 100),
@@ -100,7 +103,7 @@ def smoke_value(heartbeat):
     return {
         "event": "heartbeat" if heartbeat else ("smoke_alarm" if alarm else "clear"),
         "smoke_detected": alarm,
-        "obscuration_pct_ft": _drift(6.5 if alarm else 0.4, 0.8, 0),
+        "smoke_ppm": _drift(320 if alarm else 12, 8, 0),
         "battery": _drift(93, 4, 0, 100),
         "test_mode": False,
     }
@@ -304,6 +307,7 @@ def build_catalogue():
             uuid.uuid5(uuid.NAMESPACE_DNS, f"qprime.{spec['device_name']}")
         )
         device["gateway_id"] = random.choice(GATEWAYS)
+        device["location"] = random.choice(LOCATIONS)
         device["ip_address"] = f"192.168.11.{random.randint(20, 240)}"
         catalogue.append(device)
     return catalogue
@@ -334,7 +338,9 @@ def make_record(device, degraded_pct=0.08):
     # Backdate the reading so the timeliness factor sees a realistic delay.
     latency_ms = max(0, random.gauss(device["latency_spread_ms"], device["latency_spread_ms"] / 3))
     record = {
-        "entity": device["gateway_id"],
+        # Structured, so the schemas' entity.gateway_id / entity.location paths
+        # contribute to the completeness factor.
+        "entity": {"gateway_id": device["gateway_id"], "location": device["location"]},
         "contextAttribute": device["stream"],
         "contextValue": value,
         "refreshRate": device["refresh_rate"],

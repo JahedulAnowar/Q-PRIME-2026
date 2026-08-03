@@ -33,6 +33,36 @@ Q-PRIME persists the five per-record QoC scores:
 The dashboard plots the most recent persisted scores over time and their mean
 per device. These are raw persisted decision values, not fixed time buckets.
 
+### Correctness is unconfigured by default
+
+`config/qoc_thresholds.json` ships no `correctness_rules`, because valid ranges
+are a per-deployment policy decision rather than a property of the framework.
+With no rules configured the factor's only check is that `resource.device_id` is
+present, so it scores 1.0 on essentially every record and plots as a flat line.
+That is the shipped default, not a data-quality signal.
+
+To make it discriminate, add per-stream rules — each is checked against a path
+in the canonical record:
+
+```json
+"correctness_rules": {
+  "thp": [
+    { "path": "contextValue.temperature", "type": "number", "min": -40, "max": 85 },
+    { "path": "contextValue.humidity",    "type": "number", "min": 0,   "max": 100 },
+    { "path": "contextValue.battery",     "type": "number", "min": 0,   "max": 100 }
+  ],
+  "door": [
+    { "path": "contextValue.state", "type": "string", "allowed": ["open", "closed"] },
+    { "path": "contextValue.contact", "type": "boolean", "required": true }
+  ]
+}
+```
+
+Supported keys are `path`, `type` (`string`, `number`, `integer`, `boolean`,
+`object`, `array`), `min`, `max`, `allowed` and `required`. Rules can also be set
+per profile scope through the Configuration API, so they are versioned and
+audited like every other policy change.
+
 ## Decisions
 
 The decision table lists recent records with their device, stream,

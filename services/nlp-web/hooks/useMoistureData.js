@@ -19,7 +19,7 @@ export const useMoistureData = ({
     // Query for hourly moisture stats
     const query = `SELECT *
         FROM ${SQL_TABLE}
-        WHERE device_name IN ('Soil Moisture Sensor 1', 'SoilMoisture_1')
+        WHERE resource.device_name IN ('Soil Moisture Sensor 1', 'SoilMoisture_1')
         AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
         AND FROM_UNIXTIME(timestamp) < NOW();`;
 

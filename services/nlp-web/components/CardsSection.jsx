@@ -13,13 +13,26 @@ import EdgeCards from "@/components/EdgeCards";
 import { useTHPData } from "@/hooks/useTHPData";
 import { parseTHPContext } from "@/lib/utils";
 
+// Soil moisture is reported as a percentage on the canonical `moisture_pct`
+// field; turn the most recent reading into the label the cards colour on.
+function soilConditionFrom(rows) {
+    const latest = (rows || []).find(
+        (row) => typeof row?.contextvalue?.moisture_pct === "number"
+    );
+    if (!latest) return "-";
+    const pct = latest.contextvalue.moisture_pct;
+    if (pct < 25) return "DRY";
+    if (pct > 60) return "WET";
+    return "OPTIMAL";
+}
+
 export default function CardsSection({ databaseLayer }) {
     // Moisture data
-    let moistureData = { data: [{ soil_condition: "-" }] };
-    const soil_condition = moistureData["data"][0]?.soil_condition;
-    // moistureData = useMoistureData(1, databaseLayer);
-    // const soil_condition = moistureData["data"][0]?.event;
-    // console.log("Soil Condition: ", soil_condition);
+    const { data: moistureRows } = useMoistureData({
+        hours: 1,
+        databaseLayer: databaseLayer,
+    });
+    const soil_condition = soilConditionFrom(moistureRows);
 
     // Intruder Count
     // const intruderCount = -1; // Placeholder value
@@ -34,14 +47,15 @@ export default function CardsSection({ databaseLayer }) {
     //const sensorCount = -1; // Placeholder value
     // const { uniqueDevices: sensorCount } = useDeviceCount();
 
-    // Smoke Sensor Data
-    let smokeEventCount = -1; // Placeholder value
-    // ({ smokeEventCount } = useSmokeData({
-    //     hours: 1,
-    //     databaseLayer: databaseLayer,
-    // }));
-    // const smokeEventCount = smokeData["data"].length;
-    // console.log("Smoke Event Count: ", smokeEventCount);
+    // Smoke Sensor Data. The tile counts raised alarms, not every reading the
+    // detector produced, so filter on the event rather than using row count.
+    const { data: smokeRows } = useSmokeData({
+        hours: 1,
+        databaseLayer: databaseLayer,
+    });
+    const smokeEventCount = (smokeRows || []).filter(
+        (row) => row?.contextvalue?.event === "smoke_alarm"
+    ).length;
 
     // Door Sensor Data
     let doorEventCount = -1; // Placeholder value

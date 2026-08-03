@@ -25,7 +25,7 @@ export const useSmokeData = ({
             // Query for hourly smoke stats
             const query = `SELECT *
                 FROM ${SQL_TABLE}
-                WHERE device_name IN ('Smoke Sensor 1', 'Lab Smoke Sensor', 'SmokeDetector_1')
+                WHERE resource.device_name IN ('Smoke Sensor 1', 'Lab Smoke Sensor', 'SmokeDetector_1')
                 AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
                 AND FROM_UNIXTIME(timestamp) < NOW();`;
 

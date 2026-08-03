@@ -98,6 +98,9 @@ optional.
 
 ![Sensor dashboard](documents/images/assistant_dashboard.png)
 
+The Fall Count and AQI tiles stay at `-1` because no device in the paper's
+testbed reports either; every other tile is live.
+
 ![Natural-language queries](documents/images/assistant_chat.png)
 
 ---
@@ -110,12 +113,12 @@ randomised — but the shape is reproducible.
 
 | Measure | Result |
 |---|---|
-| Records processed | 2,285 |
-| Placed at edge | 1,795 (79%) |
-| Placed in cloud | 490 (21%) |
-| PII-carrying records | 857 |
+| Records processed | 2,693 |
+| Placed at edge | 2,047 (76%) |
+| Placed in cloud | 646 (24%) |
+| PII-carrying records | 1,049 |
 | **PII records placed in the cloud tier** | **0** |
-| Placement decision latency | 4.60 ms mean, 4.95 ms p50, 6.56 ms p95 |
+| Placement decision latency | 4.59 ms mean, 4.97 ms p50, 6.60 ms p95 |
 | Entry points exercised | 50% `direct`, 50% `edgex` |
 
 Not one PII-carrying record was *recommended* for the cloud, so none was written
@@ -123,8 +126,8 @@ to any cloud backend. The dashboard's "leak rate" is stricter still — it count
 only records that reached a configured AWS backend.
 
 Replaying those same decisions with the privacy and temporal terms removed
-(content-only weights) changes **1,552 of 2,286 placements** and sends
-**718 PII records to the cloud**. Re-enabling the paper's strict-all-PII
+(content-only weights) changes **1,802 of 2,693 placements** and sends
+**902 PII records to the cloud**. Re-enabling the paper's strict-all-PII
 mitigation on top of the same content-only weights returns that to **0**. The
 privacy term is doing real work, and the explorer lets you demonstrate it in one
 click.
@@ -221,7 +224,7 @@ The five factors:
 |---|---|
 | Timeliness | `1 − delay / threshold`, against per-stream latency thresholds; adaptive after the first record |
 | Completeness | Fraction of schema-expected fields present |
-| Correctness | Type, range and required-field rule checks |
+| Correctness | Type, range and required-field rule checks (no rules ship by default — see [documents/METRICS.md](documents/METRICS.md)) |
 | Resolution | Derived from the record's reported refresh rate |
 | Significance | Event-content heuristic; heartbeat/status events score low |
 

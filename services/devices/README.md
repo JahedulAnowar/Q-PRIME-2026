@@ -21,8 +21,8 @@ docker compose stop qprime-devices     # leave the rest of the stack running
 | `LabDoorSensor_1` | `door` | 650 ms | contact events |
 | `LabDoorSensor_2` | `door` | 650 ms | contact events |
 | `LabTHPSensor` | `thp` | 650 ms | temperature / humidity / pressure |
-| `SoilMoisture_1` | `soil` | 800 ms | moisture, conductivity |
-| `SmokeDetector_1` | `smoke` | 500 ms | occasional alarm events |
+| `SoilMoisture_1` | `soil` | 800 ms | `moisture_pct`, conductivity |
+| `SmokeDetector_1` | `smoke` | 500 ms | `smoke_ppm`, occasional alarm events |
 | `HeartMonitor_1` | `heart` | 500 ms | carries a patient identity (PII) |
 | `ZED2i` | `zed_vision` | 800 ms | person detections (PII) |
 | `Misty Robot 1` | `misty_vision` | 810 ms | face recognition (PII) |
@@ -30,10 +30,16 @@ docker compose stop qprime-devices     # leave the rest of the stack running
 | `RGBCamera_1` | `camera_vision` | 900 ms | person detections (PII) |
 
 Payloads match `services/core/schema/*-schema.json`, so the QoC completeness
-factor is scored against the same field sets the paper used. A configurable
-fraction of records is emitted degraded (a dropped or out-of-range field) to
-exercise completeness and correctness, and every stream emits periodic
-`heartbeat` events to exercise significance.
+factor is scored against the same field sets the paper used — including the
+structured `entity` carrying `gateway_id` and `location`. Numeric payload fields
+use the canonical names declared in `repository.RECORD_FIELDS`
+(`temperature`, `humidity`, `pressure`, `moisture_pct`, `smoke_ppm`, `bpm`), which
+are the ones the SQL surface and the sensor dashboard can read.
+
+A configurable fraction of records is emitted degraded (a dropped or
+out-of-range field) to exercise completeness, and every stream emits periodic
+`heartbeat` events to exercise significance. Correctness stays at 1.0 unless you
+configure `correctness_rules` — see [documents/METRICS.md](../../documents/METRICS.md).
 
 ## Configuration
 
