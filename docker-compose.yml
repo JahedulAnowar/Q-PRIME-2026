@@ -1,3 +1,14 @@
+# Q-PRIME — complete stack, zero configuration.
+#
+#   docker compose up -d --build
+#
+# No .env file is required: every variable below carries a working default.
+# `.env` only exists to remap host ports, tune the bundled device feed, or
+# enable the optional local LLM. AWS is configured from the dashboard.
+#
+# Container names are all prefixed `qprime-` so an unrelated EdgeX, MongoDB or
+# Mosquitto deployment on the same host cannot collide with this stack. Host
+# ports are equally overridable — see `.env.example`.
 name: qprime
 
 x-edgex-common: &edgex-common
@@ -30,19 +41,21 @@ services:
       mongodb:
         condition: service_healthy
     networks: [qprime]
+    # 8080 is heavily contested on developer machines, so the SQL engine is
+    # published on 8085 by default.
     ports:
-      - "127.0.0.1:${PRESTO_PORT:-8080}:8080"
+      - "127.0.0.1:${PRESTO_PORT:-8085}:8080"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/info >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 30
 
   edgex-postgres:
     <<: *edgex-common
     image: postgres:16.3-alpine
-    container_name: edgex-postgres
+    container_name: qprime-edgex-postgres
     hostname: edgex-postgres
     environment:
       POSTGRES_DB: edgex_db
@@ -58,16 +71,17 @@ services:
   edgex-mqtt-broker:
     <<: *edgex-common
     image: eclipse-mosquitto:2.0.22
-    container_name: edgex-mqtt-broker
+    container_name: qprime-edgex-mqtt-broker
     hostname: edgex-mqtt-broker
     command: ["/usr/sbin/mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    # 1883 is usually taken by a host Mosquitto; publish on 1884 instead.
     ports:
-      - "127.0.0.1:${EDGEX_MQTT_PORT:-1883}:1883"
+      - "127.0.0.1:${EDGEX_MQTT_PORT:-1884}:1883"
 
   edgex-core-keeper:
     <<: *edgex-common
     image: edgexfoundry/core-keeper:4.0.2
-    container_name: edgex-core-keeper
+    container_name: qprime-edgex-core-keeper
     hostname: edgex-core-keeper
     depends_on:
       edgex-postgres:
@@ -90,7 +104,7 @@ services:
   edgex-core-common-config-bootstrapper:
     <<: *edgex-common
     image: edgexfoundry/core-common-config-bootstrapper:4.0.2
-    container_name: edgex-core-common-config-bootstrapper
+    container_name: qprime-edgex-core-common-config-bootstrapper
     hostname: edgex-core-common-config-bootstrapper
     command: ["/core-common-config-bootstrapper", "--registry", "-cp=keeper.http://edgex-core-keeper:59890"]
     depends_on:
@@ -107,7 +121,7 @@ services:
   edgex-core-metadata:
     <<: *edgex-common
     image: edgexfoundry/core-metadata:4.0.2
-    container_name: edgex-core-metadata
+    container_name: qprime-edgex-core-metadata
     hostname: edgex-core-metadata
     command: ["--registry", "-cp=keeper.http://edgex-core-keeper:59890"]
     depends_on:
@@ -126,7 +140,7 @@ services:
   edgex-core-data:
     <<: *edgex-common
     image: edgexfoundry/core-data:4.0.2
-    container_name: edgex-core-data
+    container_name: qprime-edgex-core-data
     hostname: edgex-core-data
     command: ["--registry", "-cp=keeper.http://edgex-core-keeper:59890"]
     depends_on:
@@ -145,7 +159,7 @@ services:
   edgex-core-command:
     <<: *edgex-common
     image: edgexfoundry/core-command:4.0.2
-    container_name: edgex-core-command
+    container_name: qprime-edgex-core-command
     hostname: edgex-core-command
     command: ["--registry", "-cp=keeper.http://edgex-core-keeper:59890"]
     depends_on:
@@ -167,7 +181,7 @@ services:
   edgex-device-rest:
     <<: *edgex-common
     image: edgexfoundry/device-rest:4.0.2
-    container_name: edgex-device-rest
+    container_name: qprime-edgex-device-rest
     hostname: edgex-device-rest
     command: ["-cp=keeper.http://edgex-core-keeper:59890", "--registry"]
     depends_on:
@@ -217,7 +231,7 @@ services:
   edgex-qprime-export:
     <<: *edgex-common
     image: edgexfoundry/app-service-configurable:4.0.2
-    container_name: edgex-qprime-export
+    container_name: qprime-edgex-export
     hostname: edgex-qprime-export
     command: ["--registry", "--overwrite", "-cp=keeper.http://edgex-core-keeper:59890"]
     depends_on:
@@ -241,6 +255,31 @@ services:
     ports:
       - "127.0.0.1:${EDGEX_QPRIME_EXPORT_PORT:-59704}:59704"
 
+  # Synthetic feed from the paper's ten-device testbed. It exists so the stack
+  # shows real placement results immediately; the decision engine it drives is
+  # the actual implementation. See services/devices/README.md.
+  qprime-devices:
+    container_name: qprime-devices
+    build: ./services/devices
+    depends_on:
+      qprime-analysis:
+        condition: service_healthy
+    networks: [qprime]
+    environment:
+      QPRIME_CORE_URL: http://qprime-analysis:5005
+      EDGEX_METADATA_URL: http://edgex-core-metadata:59881
+      EDGEX_DEVICE_REST_URL: http://edgex-device-rest:59986
+      # `both` alternates direct ingestion with the full EdgeX export path, so
+      # one command exercises the whole topology. Falls back to direct if EdgeX
+      # is unavailable.
+      QPRIME_DEVICES_TRANSPORT: ${QPRIME_DEVICES_TRANSPORT:-both}
+      QPRIME_DEVICES_RATE_PER_MIN: ${QPRIME_DEVICES_RATE_PER_MIN:-240}
+      QPRIME_DEVICES_INITIAL_BURST: ${QPRIME_DEVICES_INITIAL_BURST:-400}
+      QPRIME_DEVICES_DEGRADED_PCT: ${QPRIME_DEVICES_DEGRADED_PCT:-0.08}
+      QPRIME_DEVICES_MAX_RECORDS: ${QPRIME_DEVICES_MAX_RECORDS:-0}
+      QPRIME_DEVICES_SEED: ${QPRIME_DEVICES_SEED:-}
+    restart: unless-stopped
+
   qprime-nlp:
     container_name: qprime-nlp
     build: ./services/nlp
@@ -254,6 +293,8 @@ services:
       CONTINUUM_TABLE: ${CONTINUUM_TABLE:-continuum}
       EPOCH_SCALE: ${EPOCH_SCALE:-s}
       LOCAL_TZ_NAME: ${LOCAL_TZ_NAME:-Australia/Sydney}
+      # Rule-based SQL and summaries are the default. Set these to 1 and start
+      # the `llm` profile to route through a local model instead.
       USE_LLM_SQL: ${USE_LLM_SQL:-}
       USE_LLM_SUMMARY: ${USE_LLM_SUMMARY:-}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
@@ -305,8 +346,11 @@ services:
       - ollama-models:/root/.ollama
 
 networks:
-  qprime:
-    name: qprime-network
+  # Deliberately unnamed: Compose namespaces it as `qprime_qprime`. A hardcoded
+  # network name collides with any other Compose project that claims the same
+  # one — including the companion Q-PRIME-Simulator repository — and the whole
+  # stack then refuses to start.
+  qprime: {}
 
 volumes:
   qprime-mongodb-data:

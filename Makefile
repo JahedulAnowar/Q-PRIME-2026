@@ -1,16 +1,25 @@
-.PHONY: up down logs clean test reproduce dev llm
+.PHONY: up down restart logs ps clean test reproduce dev llm edgex-feed
 
-up:            ## Start the analysis and query applications
+up:            ## Start the whole stack (no configuration required)
 	docker compose up -d --build
 
-down:          ## Stop the applications
+down:          ## Stop the stack, keeping stored data
 	docker compose down
 
-clean:         ## Stop the applications and remove the optional model volume
-	docker compose down -v
+restart:       ## Recreate the application services without touching data
+	docker compose up -d --build --force-recreate qprime-analysis qprime-nlp qprime-query qprime-devices
 
 logs:          ## Tail application logs
-	docker compose logs -f qprime-analysis qprime-nlp qprime-query
+	docker compose logs -f qprime-analysis qprime-nlp qprime-query qprime-devices
+
+ps:            ## Show container status
+	docker compose ps
+
+clean:         ## Stop the stack and delete all stored data and volumes
+	docker compose down -v
+
+edgex-feed:    ## Re-run the bundled feed through EdgeX instead of direct ingestion
+	QPRIME_DEVICES_TRANSPORT=edgex docker compose up -d --force-recreate qprime-devices
 
 llm:           ## Start the optional local LLM and pull its model
 	docker compose --profile llm up -d ollama
