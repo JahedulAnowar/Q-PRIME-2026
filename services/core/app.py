@@ -20,6 +20,7 @@ from qprime import decision as decision_mod
 from qprime import sla as sla_mod
 from qprime.config import RuntimeConfig, runtime_config
 from qprime.cloud import cloud_adapter
+from qprime.cloud_config import cloud_configuration
 from qprime.metrics import dashboard_metrics
 from qprime.normalization import normalize_direct
 from qprime.pipeline import pipeline
@@ -184,6 +185,34 @@ def config_ahp():
             result["applied"] = True
         return jsonify(result)
     except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except PyMongoError as exc:
+        return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
+
+
+@app.route("/api/cloud/config", methods=["GET", "PUT", "OPTIONS"])
+def cloud_config_endpoint():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        pipeline.initialise()
+        if request.method == "GET":
+            return jsonify(cloud_configuration.snapshot())
+        return jsonify(cloud_configuration.save(request.get_json(force=True) or {}))
+    except (TypeError, ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except PyMongoError as exc:
+        return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
+
+
+@app.route("/api/cloud/config/probe", methods=["POST", "OPTIONS"])
+def cloud_config_probe():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        pipeline.initialise()
+        return jsonify(cloud_configuration.probe())
+    except (TypeError, ValueError, RuntimeError) as exc:
         return jsonify({"error": str(exc)}), 400
     except PyMongoError as exc:
         return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503

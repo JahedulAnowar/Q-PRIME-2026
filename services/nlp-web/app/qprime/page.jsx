@@ -106,7 +106,54 @@ function Privacy({ data }) {
     return <><div className={styles.metrics}><Metric label="PII records" value={data.pii_records}/><Metric label="PII sent to configured AWS" value={data.pii_leaked_to_cloud} tone={data.pii_leaked_to_cloud ? "danger" : "edge"}/><Metric label="Leak rate" value={`${data.leak_rate || 0}%`}/><Metric label="Cloud fallback is local" value="MongoDB" tone="both"/></div><Panel title="PII placement per device"><ResponsiveContainer width="100%" height={350}><BarChart data={data.by_device || []}><CartesianGrid stroke="#e2e8f0"/><XAxis dataKey="device"/><YAxis allowDecimals={false}/><Tooltip/><Legend/><Bar dataKey="pii_records" fill="#f5a623"/><Bar dataKey="leaked_to_cloud" fill="#e84455"/></BarChart></ResponsiveContainer></Panel></>;
 }
 
-function Configuration({ config, onSaved }) {
+function CloudConfiguration({ cloud, onSaved }) {
+    const [form, setForm] = useState({ enabled: false, mode: "firehose", region: "", kinesis_stream: "", firehose_stream: "", athena_database: "", athena_table: "", athena_workgroup: "primary", athena_output: "", access_key_id: "", secret_access_key: "", session_token: "" });
+    const [message, setMessage] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        setForm((current) => ({ ...current, ...Object.fromEntries(["enabled", "mode", "region", "kinesis_stream", "firehose_stream", "athena_database", "athena_table", "athena_workgroup", "athena_output"].map((key) => [key, cloud?.[key] ?? current[key]])), access_key_id: "", secret_access_key: "", session_token: "" }));
+    }, [cloud?.updated_at, cloud?.source]);
+
+    function update(key, value) { setForm((current) => ({ ...current, [key]: value })); }
+    async function save(event) {
+        event.preventDefault(); setSaving(true);
+        try {
+            const saved = await api("cloud/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+            setMessage(`Saved and applied. Credentials are ${saved.access_key_configured ? "encrypted and stored" : "not configured"}.`);
+            setForm((current) => ({ ...current, access_key_id: "", secret_access_key: "", session_token: "" })); onSaved();
+        } catch (error) { setMessage(error.message); } finally { setSaving(false); }
+    }
+    async function probe() {
+        setSaving(true);
+        try { const result = await api("cloud/config/probe", { method: "POST" }); setMessage(result.status === "connected" ? "AWS connection verified." : result.last_error || `AWS status: ${result.status}.`); }
+        catch (error) { setMessage(error.message); } finally { setSaving(false); }
+    }
+    const usesKinesis = form.mode === "kinesis";
+    return <Panel title="AWS Cloud storage" subtitle="Saved in MongoDB and applied to new placements immediately">
+        <p className={styles.helpText}>Enter the static AWS credentials once. They are encrypted before storage and never returned to this page. Existing keys are retained when these fields are left blank.</p>
+        <form className={styles.cloudForm} onSubmit={save}>
+            <label className={styles.toggle}><input type="checkbox" checked={form.enabled} onChange={(e) => update("enabled", e.target.checked)}/><span>Enable AWS Cloud placement</span></label>
+            <div className={styles.cloudGrid}>
+                <label>AWS region<input required={form.enabled} value={form.region} onChange={(e) => update("region", e.target.value)} placeholder="ap-southeast-2"/></label>
+                <label>Ingestion service<select value={form.mode} onChange={(e) => update("mode", e.target.value)}><option value="firehose">Amazon Data Firehose</option><option value="kinesis">Amazon Kinesis Data Streams</option></select></label>
+                <label className={usesKinesis ? "" : styles.hiddenField}>Kinesis stream<input required={form.enabled && usesKinesis} value={form.kinesis_stream} onChange={(e) => update("kinesis_stream", e.target.value)} placeholder="qprime-records"/></label>
+                <label className={usesKinesis ? styles.hiddenField : ""}>Firehose delivery stream<input required={form.enabled && !usesKinesis} value={form.firehose_stream} onChange={(e) => update("firehose_stream", e.target.value)} placeholder="qprime-records"/></label>
+            </div>
+            <fieldset><legend>Static AWS credentials</legend><div className={styles.cloudGrid}>
+                <label>Access key ID<input autoComplete="off" value={form.access_key_id} onChange={(e) => update("access_key_id", e.target.value)} placeholder={cloud?.access_key_configured ? "Configured — enter to replace" : "AKIA..."}/></label>
+                <label>Secret access key<input type="password" autoComplete="new-password" value={form.secret_access_key} onChange={(e) => update("secret_access_key", e.target.value)} placeholder={cloud?.access_key_configured ? "Configured — enter to replace" : "Paste secret key"}/></label>
+                <label>Session token <small>Optional</small><input type="password" autoComplete="new-password" value={form.session_token} onChange={(e) => update("session_token", e.target.value)} placeholder={cloud?.session_token_configured ? "Configured — enter to replace" : "Temporary-credential token"}/></label>
+            </div></fieldset>
+            <details className={styles.athena}><summary>Athena query settings <span>Optional, needed for Cloud queries</span></summary><div className={styles.cloudGrid}>
+                <label>Database<input value={form.athena_database} onChange={(e) => update("athena_database", e.target.value)} placeholder="qprime"/></label><label>Table<input value={form.athena_table} onChange={(e) => update("athena_table", e.target.value)} placeholder="continuum"/></label><label>Workgroup<input value={form.athena_workgroup} onChange={(e) => update("athena_workgroup", e.target.value)} placeholder="primary"/></label><label>Athena results S3 URI<input value={form.athena_output} onChange={(e) => update("athena_output", e.target.value)} placeholder="s3://bucket/athena-results/"/></label>
+            </div></details>
+            <div className={styles.actions}><button type="submit" disabled={saving}>{saving ? "Saving…" : "Save and apply AWS configuration"}</button><button type="button" className={styles.secondaryButton} disabled={saving || !cloud?.access_key_configured} onClick={probe}>Test AWS connection</button><span>{message}</span></div>
+        </form>
+    </Panel>;
+}
+
+function Configuration({ config, cloud, onSaved }) {
     const activeGlobal = (config.active_profiles || []).find((item) => item.scope === "global");
     const [scope, setScope] = useState("global");
     const [selector, setSelector] = useState("");
@@ -179,7 +226,8 @@ function Configuration({ config, onSaved }) {
 
     const displayedWeights = normaliseWeights(directWeights);
     const ahpInvalid = weightMode === "global_ahp" && (!ahpPreview || !ahpPreview.consistent);
-    return <div className={styles.gridConfig}>
+    return <div className={styles.configStack}>
+      <div className={styles.gridConfig}>
         <Panel title="Criteria weights" subtitle="Controls the live Edge / Cloud / Both placement score">
             <p className={styles.helpText}>Choose how Q-PRIME weights temporal QoC, content QoC, and privacy. This privacy criterion is separate from a record’s privacy sensitivity score.</p>
             <div className={styles.formRow}><label>Profile scope<select value={scope} onChange={(e) => setScope(e.target.value)}><option value="global">Global</option><option value="stream">One paper stream</option><option value="device">One device</option></select></label>{scope === "device" ? <label>Device selector<input value={selector} onChange={(e) => setSelector(e.target.value)} placeholder="device name or ID"/></label> : scope === "stream" ? <label>Profile stream<select value={stream} onChange={(e) => selectStream(e.target.value)}>{PAPER_STREAMS.map((key) => <option key={key} value={key}>{key.replace("_", " ")}</option>)}</select></label> : <label>Applies to<input value="All incoming records" disabled/></label>}</div>
@@ -204,6 +252,8 @@ function Configuration({ config, onSaved }) {
         <Panel title="Active profiles" subtitle="All changes persist in MongoDB">
             <p className={styles.helpText}>Resolution order: device → stream → global. New records resolve the active profile before Q-PRIME scores placement.</p><div className={styles.profileList}>{(config.active_profiles || []).map((profile) => <article key={profile.version}><strong>{profile.scope}{profile.selector ? ` · ${profile.selector}` : ""}</strong><span>{profile.label}</span><code>{profile.version}</code><small>{new Date(profile.created_at).toLocaleString()}</small></article>)}</div>
         </Panel>
+      </div>
+      <CloudConfiguration cloud={cloud} onSaved={onSaved}/>
     </div>;
 }
 
@@ -227,18 +277,18 @@ function Performance({ data }) {
 
 export default function QPrimePage() {
     const [tab, setTab] = useState("Overview"); const [data, setData] = useState(empty);
-    const [health, setHealth] = useState({}); const [config, setConfig] = useState({ active_profiles: [] });
+    const [health, setHealth] = useState({}); const [config, setConfig] = useState({ active_profiles: [] }); const [cloud, setCloud] = useState({});
     const [error, setError] = useState(""); const [loading, setLoading] = useState(true);
     const refresh = useCallback(async () => {
         try {
-            const [h, o, q, d, p, perf, cfg] = await Promise.all([api("health"), api("results/overview"), api("results/qoc"), api("results/decisions?limit=250"), api("results/privacy"), api("results/performance"), api("config")]);
-            setHealth(h); setData({ overview: o, qoc: q, decisions: d.decisions || [], privacy: p, performance: perf }); setConfig(cfg); setError("");
+            const [h, o, q, d, p, perf, cfg, cloudConfig] = await Promise.all([api("health"), api("results/overview"), api("results/qoc"), api("results/decisions?limit=250"), api("results/privacy"), api("results/performance"), api("config"), api("cloud/config")]);
+            setHealth(h); setData({ overview: o, qoc: q, decisions: d.decisions || [], privacy: p, performance: perf }); setConfig(cfg); setCloud(cloudConfig); setError("");
         } catch (e) { setError(e.message); } finally { setLoading(false); }
     }, []);
     useEffect(() => { refresh(); const timer = setInterval(refresh, 10000); return () => clearInterval(timer); }, [refresh]);
     return <main className={styles.shell}>
         <header className={styles.header}><div className={styles.brand}><div className={styles.brandMark}>Q</div><div><strong>Q-PRIME</strong><span>Paper implementation · live QoC and placement analytics</span></div></div><div className={styles.status}><StatusBadge label="Core" status={health.status}/><StatusBadge label="EdgeX" status={health.edgex?.status}/><StatusBadge label="MongoDB" status={health.mongodb?.status}/><StatusBadge label="Cloud" status={health.cloud?.status}/><Link href={withBasePath("/")}>Sensor Dashboard</Link></div></header>
-        <div className={styles.content}><nav>{TABS.map((name) => <button key={name} className={tab === name ? styles.active : ""} onClick={() => setTab(name)}>{name}</button>)}</nav>{error && <div className={styles.error}>{error}</div>}{loading ? <div className={styles.loading}>Loading Q-PRIME results…</div> : <>{tab === "Overview" && <Overview data={data.overview}/>} {tab === "QoC Factors" && <QoC data={data.qoc}/>} {tab === "Decisions" && <Decisions rows={data.decisions}/>} {tab === "Privacy" && <Privacy data={data.privacy}/>} {tab === "Configuration" && <Configuration config={config} onSaved={refresh}/>} {tab === "Sensitivity" && <Sensitivity/>} {tab === "Performance" && <Performance data={data.performance}/>}</>}</div>
+        <div className={styles.content}><nav>{TABS.map((name) => <button key={name} className={tab === name ? styles.active : ""} onClick={() => setTab(name)}>{name}</button>)}</nav>{error && <div className={styles.error}>{error}</div>}{loading ? <div className={styles.loading}>Loading Q-PRIME results…</div> : <>{tab === "Overview" && <Overview data={data.overview}/>} {tab === "QoC Factors" && <QoC data={data.qoc}/>} {tab === "Decisions" && <Decisions rows={data.decisions}/>} {tab === "Privacy" && <Privacy data={data.privacy}/>} {tab === "Configuration" && <Configuration config={config} cloud={cloud} onSaved={refresh}/>} {tab === "Sensitivity" && <Sensitivity/>} {tab === "Performance" && <Performance data={data.performance}/>}</>}</div>
         <footer>Q-PRIME · A Quality- and Privacy-Aware Edge–Cloud Continuum Framework for IoT Applications</footer>
     </main>;
 }

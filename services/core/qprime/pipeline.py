@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from . import decision as decision_mod
 from . import sla as sla_mod
 from .cloud import AwsCloudAdapter, cloud_adapter
+from .cloud_config import cloud_configuration
 from .normalization import normalize_direct, normalize_edgex
 from .profiles import PersistentConfig, persistent_config
 from .repository import MongoRepository, repository
@@ -58,6 +59,7 @@ class PlacementPipeline:
 
     def initialise(self) -> None:
         self.repository.ensure_indexes()
+        cloud_configuration.initialise()
         self.config.ensure_seeded()
 
     def ingest_direct(self, payload: Dict[str, Any]) -> Dict[str, Any]:

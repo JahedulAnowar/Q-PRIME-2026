@@ -202,20 +202,11 @@ services:
       MONGODB_DATABASE: ${MONGODB_DATABASE:-qprime}
       PRESTO_URL: http://presto:8080
       EDGEX_METADATA_URL: http://edgex-core-metadata:59881
-      AWS_CLOUD_ENABLED: ${AWS_CLOUD_ENABLED:-false}
-      AWS_REGION: ${AWS_REGION:-}
-      AWS_INGEST_MODE: ${AWS_INGEST_MODE:-firehose}
-      AWS_KINESIS_STREAM: ${AWS_KINESIS_STREAM:-}
-      AWS_FIREHOSE_STREAM: ${AWS_FIREHOSE_STREAM:-}
-      AWS_ATHENA_DATABASE: ${AWS_ATHENA_DATABASE:-}
-      AWS_ATHENA_TABLE: ${AWS_ATHENA_TABLE:-}
-      AWS_ATHENA_WORKGROUP: ${AWS_ATHENA_WORKGROUP:-primary}
-      AWS_ATHENA_OUTPUT: ${AWS_ATHENA_OUTPUT:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      QPRIME_CONFIG_KEY_PATH: /var/lib/qprime/secrets/aws-config.key
     ports:
       - "${QPRIME_ANALYSIS_PORT:-5005}:5005"
+    volumes:
+      - qprime-core-secrets:/var/lib/qprime/secrets
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:5005/')\""]
@@ -319,5 +310,6 @@ networks:
 
 volumes:
   qprime-mongodb-data:
+  qprime-core-secrets:
   edgex-postgres-data:
   ollama-models:

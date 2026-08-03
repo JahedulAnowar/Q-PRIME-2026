@@ -88,6 +88,22 @@ findings, reason, and timings. MongoDB also persists policy versions, audit
 history, adaptive QoC baselines, and query metrics. Existing local Cloud
 fallback records are never copied to AWS when AWS later becomes available.
 
+## AWS configuration and credential protection
+
+AWS Cloud settings are configured in the Q-PRIME dashboard rather than in an
+application `.env` file. The dashboard sends its region, delivery stream, and
+optional Athena settings to the core API, which persists the active
+configuration in MongoDB and immediately applies it to future placements and
+Cloud queries. Static access keys, secret access keys, and optional session
+tokens are encrypted before being written to MongoDB; the API returns only
+whether credentials are configured, never their values.
+
+The Compose stack keeps the encryption key in the `qprime-core-secrets` Docker
+volume, separate from the MongoDB data volume. Both volumes must be retained
+for a saved AWS configuration to remain usable after restart. Removing the
+secrets volume makes the previously encrypted credentials unreadable, so they
+must then be entered again through the dashboard.
+
 ## Query and dashboard paths
 
 The query application and the `/qprime` dashboard share the Next.js web

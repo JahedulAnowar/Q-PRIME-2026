@@ -213,6 +213,7 @@
 
 .grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .gridConfig { grid-template-columns: minmax(0, 2fr) minmax(290px, 1fr); }
+.configStack { display: grid; gap: 20px; }
 .stack { display: grid; gap: 20px; }
 
 .tableWrap {
@@ -305,6 +306,13 @@
   background: #cbd5e1;
   box-shadow: none;
 }
+.secondaryButton {
+  border: 1px solid #e0a5bd !important;
+  background: #fff !important;
+  color: #990033 !important;
+  box-shadow: none !important;
+}
+.secondaryButton:hover { background: #fff1f6 !important; }
 .actions span { color: #64748b; font-size: 13px; }
 
 .profileList { display: grid; gap: 10px; }
@@ -329,6 +337,42 @@
   font-size: 13px;
   line-height: 1.55;
 }
+
+.cloudForm { display: grid; gap: 16px; }
+.cloudForm label,
+.cloudForm legend {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cloudForm label:not(.toggle) { display: grid; gap: 7px; }
+.cloudForm input,
+.cloudForm select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #dbe1ea;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+  color: #1e293b;
+}
+.cloudForm fieldset {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.cloudForm legend { padding: 0 5px; }
+.cloudGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.toggle { display: flex !important; align-items: center; gap: 9px; color: #334155 !important; }
+.toggle input { width: auto; accent-color: #990033; }
+.cloudForm small { color: #64748b; font-weight: 500; }
+.hiddenField { display: none !important; }
+.athena { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; background: #f8fafc; }
+.athena summary { cursor: pointer; color: #334155; font-size: 13px; font-weight: 700; }
+.athena summary span { margin-left: 7px; color: #64748b; font-size: 12px; font-weight: 500; }
+.athena .cloudGrid { margin-top: 14px; }
 
 .modeGrid {
   display: grid;
@@ -481,6 +525,7 @@
   .modeGrid { grid-template-columns: 1fr; }
   .modeGrid label { min-height: 0; }
   .ahpTool label { grid-template-columns: 1fr; }
+  .cloudGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
