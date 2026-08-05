@@ -443,15 +443,6 @@ documents/           # architecture, device and metric notes, plus screenshots
 
 ---
 
-## Related repository
-
-[**KSJ-CDMS/Q-PRIME-Simulator**](https://github.com/KSJ-CDMS/Q-PRIME-Simulator) is a
-companion simulation environment for reproducing and exploring the paper's
-results with an interactive device generator. This repository is the full
-deployable implementation, including the EdgeX integration and the query
-application.
-
----
 
 ## Citation and license
 
