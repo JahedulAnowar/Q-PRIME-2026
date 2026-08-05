@@ -57,14 +57,16 @@ export default function CardsSection({ databaseLayer }) {
         (row) => row?.contextvalue?.event === "smoke_alarm"
     ).length;
 
-    // Door Sensor Data
-    let doorEventCount = -1; // Placeholder value
-    ({ doorEventCount } = useDoorData({
+    // Door Sensor Data. As with smoke, the tile counts openings rather than
+    // every contact reading — row count alone just reported the query's
+    // server-side row cap.
+    const { data: doorRows } = useDoorData({
         hours: 1,
         databaseLayer: databaseLayer,
-    }));
-    // const doorEventCount = smokeData["data"].length;
-    // console.log("Door Event Count: ", doorEventCount);
+    });
+    const doorEventCount = (doorRows || []).filter(
+        (row) => row?.contextvalue?.event === "opened"
+    ).length;
 
     let thp_temp = -1;
     let thp_humidity = -1;

@@ -121,10 +121,17 @@ class QueryRouter:
             sources = ["presto:mongodb.edge_records", "athena"]
             source = "federated"
         else:
-            edge_results = self._presto(self._rewrite(expression, "edge_records"))
-            cloud_results = self._presto(self._rewrite(expression, "cloud_records"))
             results = self._presto(self._rewrite_continuum(expression))
-            edge_rows, cloud_rows = len(edge_results), len(cloud_results)
+            # The per-tier executions exist only to report how much of the
+            # answer came from each tier. For an aggregate that split counts
+            # aggregate rows rather than records, so it is neither meaningful
+            # nor displayed — and running the statement three times over both
+            # collections is exactly the load that used to exhaust Presto.
+            if self._aggregated(expression):
+                edge_rows = cloud_rows = 0
+            else:
+                edge_rows = len(self._presto(self._rewrite(expression, "edge_records")))
+                cloud_rows = len(self._presto(self._rewrite(expression, "cloud_records")))
             sources = ["presto:mongodb.edge_records", "presto:mongodb.cloud_records"]
 
         elapsed = round((time.perf_counter() - started) * 1000, 3)
@@ -172,10 +179,18 @@ class QueryRouter:
         for table in expression.find_all(exp.Table):
             if not self._is_logical(table):
                 raise QueryValidationError("query may only access the Q-PRIME logical table")
-        if not any(expression.find(kind) for kind in (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)):
+        if not self._aggregated(expression):
             if expression.args.get("limit") is None:
                 expression = expression.limit(QUERY_MAX_ROWS)
         return expression
+
+    @staticmethod
+    def _aggregated(expression: exp.Expression) -> bool:
+        """True when rows are summarised rather than returned one per record."""
+        return any(
+            expression.find(kind)
+            for kind in (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)
+        )
 
     @staticmethod
     def _is_logical(table: exp.Table) -> bool:

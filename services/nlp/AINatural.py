@@ -358,12 +358,14 @@ def _window_seconds(val: int, unit: str) -> int:
 
 
 def devices_predicate_for(canon: str, alias_hint: Optional[str] = None) -> str:
-    """Prefer resource.device_id IN (...) when known; else device_name IN (...)."""
-    ids = DEVICE_IDS.get(canon, [])
-    if ids:
-        quoted = ", ".join(sql_str(i) for i in ids)
-        return f"resource.device_id IN ({quoted})"
+    """Match a canonical device by name, and by ID where an ID is known.
 
+    ``DEVICE_IDS`` holds identifiers recorded in one specific SDC-lab
+    deployment. Filtering on them *exclusively* meant every Misty, ZED and
+    drone question answered zero against any other deployment — including the
+    testbed this repository ships — because those devices carry different IDs.
+    The ID is now an additional way to match, not the only one.
+    """
     names: Optional[List[str]] = None
     if alias_hint:
         alias_key = _alias_key(alias_hint)
@@ -378,8 +380,12 @@ def devices_predicate_for(canon: str, alias_hint: Optional[str] = None) -> str:
     if not names:
         names = DEVICE_DB_NAME.get(canon, [canon])
 
-    quoted = ", ".join(sql_str(n) for n in names)
-    return f"resource.device_name IN ({quoted})"
+    predicate = f"resource.device_name IN ({', '.join(sql_str(n) for n in names)})"
+    ids = DEVICE_IDS.get(canon, [])
+    if ids:
+        by_id = f"resource.device_id IN ({', '.join(sql_str(i) for i in ids)})"
+        return f"({by_id} OR {predicate})"
+    return predicate
 
 
 # ---------- Time parsing ----------
@@ -1212,8 +1218,7 @@ def try_strict_intruder_template(
             f'\n  AND "timestamp" >= {time_hint["start_epoch"]}'
             f'\n  AND "timestamp" <  {time_hint["end_epoch"]}'
         )
-    # Prefer device_id if you have it, else device_name fallback:
-    dev_pred = "resource.device_id IN ('misty_03953')"  # or devices_predicate_for("MistyRobot1")
+    dev_pred = devices_predicate_for("MistyRobot1")
     return (
         f"SELECT COUNT(*) AS intruder_count\n"
         f"FROM {get_table_fqn()}\n"

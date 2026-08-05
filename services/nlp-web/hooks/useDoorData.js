@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -26,14 +26,7 @@ export const useDoorData = ({
             const query = `SELECT *
                 FROM ${SQL_TABLE}
                 WHERE resource.device_name IN ('LabDoorSensor_1', 'LabDoorSensor_2', 'Door Sensor', 'Main Door Sensor', 'Back Door Sensor')
-                AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-                AND FROM_UNIXTIME(timestamp) < NOW();`;
-
-            // Fix Edge Layer SQL command later
-            // const queryEdge = `SELECT *
-            //     FROM ${SQL_TABLE}
-            //     AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-            //     AND FROM_UNIXTIME(timestamp) < NOW();`;
+                AND ${timeWindowSql(hours)};`;
 
             const response = await fetch(withBasePath("/api/dashboard/door"), {
                 method: "POST",

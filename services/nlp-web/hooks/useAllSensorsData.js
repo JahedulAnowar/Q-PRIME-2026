@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -16,18 +16,14 @@ export const useAllSensorsData = ({
     const [error, setError] = useState(null);
 
 
-    // Query for hourly all sensors stats
-    const query = `SELECT resource.device_name, contextValue, COUNT(*) AS event_count
+    // Event counts per device, which is what the stacked bar renders. Grouping
+    // by the whole `contextValue` row instead produced one group per record —
+    // thousands of single-count rows carrying no `event` column at all, so the
+    // chart stacked everything into a single "Unknown" band.
+    const query = `SELECT resource.device_name, contextValue.event AS event, COUNT(*) AS event_count
         FROM ${SQL_TABLE}
-        WHERE FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-        AND FROM_UNIXTIME(timestamp) < NOW()
-        GROUP BY resource.device_name, contextValue;`;
-
-    // const queryEdge = `SELECT *
-    //     FROM ${SQL_TABLE}
-    //     AND to_timestamp(timestamp) >= NOW() - INTERVAL '${hours}' hour
-    //     AND to_timestamp(timestamp) < NOW()
-    //     ORDER BY timestamp DESC;`;
+        WHERE ${timeWindowSql(hours)}
+        GROUP BY resource.device_name, contextValue.event;`;
 
     const fetchAllSensorStats = useCallback(async () => {
         //query

@@ -10,8 +10,16 @@ retained for every decision.
 
 This repository is the complete implementation: the paper's algorithms, EdgeX
 Foundry integration for real devices, MongoDB edge storage, optional AWS cloud
-storage, a unified read-only SQL surface over both tiers, and the natural-language
-query application.
+storage, a unified read-only SQL surface over both tiers, and the
+natural-language query application.
+
+---
+
+## Getting started
+
+Requirements: Docker 24+ with Compose v2, and about 10 GB free disk.
+
+### 1. Start the stack
 
 ```bash
 git clone https://github.com/JahedulAnowar/Q-PRIME-2026.git
@@ -19,161 +27,31 @@ cd Q-PRIME-2026
 docker compose up -d --build
 ```
 
-Then open **<http://localhost:3000/qprime>**. No `.env` is required. The stack
-starts with generated data **off**; select Simulator or Sample EdgeX Feed in the
-dashboard when you want demonstration records, or connect real devices through
-EdgeX instead.
-
----
-
-## Features
-
-### Per-record Edge / Cloud placement
-
-Every ingested record is scored and placed. The overview reports the live split
-across tiers and per device, alongside PII counts and cloud-fallback usage.
-
-![Placement overview](documents/images/qprime_results_overview.png)
-
-### Five Quality-of-Context factors, scored continuously
-
-Timeliness, completeness, correctness, resolution and significance are evaluated
-per record against per-stream latency thresholds and JSON schemas, then tracked
-over time and averaged per device. After a device's first record, Q-PRIME
-switches to a persistent adaptive baseline: the latency threshold follows an
-EWMA of observed delay rather than a fixed constant.
-
-![QoC factors](documents/images/qprime_qoc_factors.png)
-
-### Every decision is explainable
-
-Each placement records both scores, the effective weight profile and version, the
-reason, the actual storage backend, and which entry point the record arrived
-through — `direct` for API producers, `edgex` for real devices.
-
-![Placement decisions](documents/images/qprime_decisions.png)
-
-### Privacy accounting
-
-PII is detected from record payloads — identities, names, ages, SSNs, and person
-detections from vision streams. A record marked `privacy_filter: strict` bypasses
-scoring entirely and is pinned to the edge. The dashboard tracks how many
-PII-carrying records exist and how many ever reached a configured cloud backend.
-
-![Privacy statistics](documents/images/qprime_privacy-stats.png)
-
-### Configurable criteria weights, including AHP
-
-Weights resolve per device → per stream → global. Choose direct per-stream
-weights (the paper's default), one global triple, weights derived from the six
-individual metric weights, or a global Analytic Hierarchy Process matrix built
-from Saaty pairwise comparisons with its consistency ratio reported and enforced
-at ≤ 0.10. Every change is versioned and audited. The same tab configures AWS
-cloud storage — credentials are encrypted before storage and never returned to
-the page.
-
-![Criteria weights and cloud configuration](documents/images/qprime_weights.png)
-
-### Sensitivity explorer
-
-Replay every logged decision under different criteria weights without re-ingesting
-or moving any data — the fastest way to see what the privacy term is actually
-buying you. The run below drops privacy and temporal weight entirely
-(content-only weighting) against the same records:
-
-![Sensitivity explorer](documents/images/qprime_sensitivity.png)
-
-### Performance instrumentation
-
-Placement and query latency are measured for every operation and retained, so
-overhead is observable rather than asserted.
-
-![Performance](documents/images/qprime_performance.png)
-
-### Natural-language and SQL queries across both tiers
-
-One logical table, `qprime.continuum`, spans edge and cloud. Ask in English or
-write SQL, and scope the query to the edge, the cloud, or the whole continuum.
-Rule-based SQL generation and summarisation are the default; a local LLM is
-optional.
-
-![Sensor dashboard](documents/images/assistant_dashboard.png)
-
-The Fall Count and AQI tiles stay at `-1` because no device in the paper's
-testbed reports either; every other tile is live.
-
-![Natural-language queries](documents/images/assistant_chat.png)
-
----
-
-## Generated demonstration data
-
-The **Data Sources** tab offers two mutually exclusive, user-started modes.
-Simulator sends selected, configurable sensors directly to Q-PRIME. Sample
-EdgeX Feed provisions the paper testbed in EdgeX and routes all generated
-events through EdgeX's export service. Both modes are Off after startup and
-after restart; existing MongoDB records are retained.
-
-The figures below are an earlier sample run of the paper testbed after it was
-explicitly started. They are illustrative, not data produced automatically by a
-fresh deployment.
-
-| Measure | Result |
-|---|---|
-| Records processed | 2,693 |
-| Placed at edge | 2,047 (76%) |
-| Placed in cloud | 646 (24%) |
-| PII-carrying records | 1,049 |
-| **PII records placed in the cloud tier** | **0** |
-| Placement decision latency | 4.59 ms mean, 4.97 ms p50, 6.60 ms p95 |
-| Entry points exercised | 50% `direct`, 50% `edgex` |
-
-Not one PII-carrying record was *recommended* for the cloud, so none was written
-to any cloud backend. The dashboard's "leak rate" is stricter still — it counts
-only records that reached a configured AWS backend.
-
-Replaying those same decisions with the privacy and temporal terms removed
-(content-only weights) changes **1,802 of 2,693 placements** and sends
-**902 PII records to the cloud**. Re-enabling the paper's strict-all-PII
-mitigation on top of the same content-only weights returns that to **0**. The
-privacy term is doing real work, and the explorer lets you demonstrate it in one
-click.
-
-> **On generated modes.** The decision engine, QoC scoring, privacy analysis and
-> placement are the real implementation — only the chosen device readings are
-> generated. See [services/devices/README.md](services/devices/README.md).
-
----
-
-## Quick start
-
-Requirements: Docker 24+ with Compose v2, and about 10 GB free disk.
-
-```bash
-docker compose up -d --build
-```
-
-That is the whole setup. `.env` is optional and only needed for host-port
-remapping, tuning the Sample EdgeX Feed, or the optional local LLM — see
-[.env.example](.env.example). AWS is configured from the dashboard, not from a
-file.
+That is the whole setup — no `.env` file is required. Every variable carries a
+working default, and AWS is configured from the dashboard rather than from a
+file. `.env` is only needed to remap host ports, tune the Sample EdgeX Feed, or
+enable the optional local LLM; see [.env.example](.env.example).
 
 First run pulls and builds roughly 8.3 GB of images — PrestoDB alone is 4.8 GB —
 so expect several minutes. Once images are cached the command returns in about
-30 seconds and all fifteen containers report healthy shortly after.
+30 seconds and all sixteen containers report healthy shortly after.
 
-| Service | URL | Purpose |
-|---|---|---|
-| Q-PRIME dashboard | <http://localhost:3000/qprime> | QoC, placements, privacy, weights, sensitivity, performance |
-| Query application | <http://localhost:3000> | Natural-language / SQL queries and device charts |
-| Core API | <http://localhost:5005> | Ingestion, paper algorithms, persistence, query routing |
-| NLP API | <http://localhost:5500> | Natural language to SQL and result summarisation |
-| PrestoDB | <http://localhost:8085> | SQL over MongoDB and the continuum union |
-| MongoDB 8 | `localhost:27017` | Edge records, cloud fallback, policies, decisions, audit |
-| EdgeX 4.0.2 | `localhost:59880–59890` | Real-device integration and event export |
-| EdgeX Console | <http://localhost:4000> | Device, profile, service and event management |
+### 2. Turn on a data source
 
-Common operations:
+Open **<http://localhost:3000/qprime>** and go to the **Data Sources** tab.
+
+The stack deliberately starts with data generation **off**, so nothing is
+written until you choose a source. Pick one of the two generated modes and press
+**Start selected mode** — or skip this step entirely and connect real devices
+through EdgeX instead.
+
+### 3. Watch it work
+
+| Open | For |
+|---|---|
+| <http://localhost:3000> | Live sensor tiles and charts |
+| <http://localhost:3000/qprime> | Placement decisions, QoC, privacy, weights, performance |
+| <http://localhost:3000/queries> | Ask questions in English or SQL |
 
 ```bash
 docker compose ps            # status
@@ -182,7 +60,147 @@ docker compose down          # stop, keep data
 docker compose down -v       # stop and delete all stored data
 ```
 
-`make up`, `make down`, `make logs`, `make ps` and `make clean` wrap the same commands.
+`make up`, `make down`, `make logs`, `make ps` and `make clean` wrap the same
+commands.
+
+---
+
+## The screens
+
+### Data Sources — choose what produces records
+
+The first tab to visit. **Simulator** sends selected sensors straight to
+`POST /api/ingest`, with per-sensor controls for interval, refresh rate, added
+latency, dropped fields, corrupted values, low-significance rate and privacy
+filter — so you can drive any QoC factor to any value and watch the placement
+change. **Sample EdgeX Feed** provisions the same testbed inside EdgeX and
+routes every reading through the real device → core-data → export path. The two
+are mutually exclusive, and both are off again after a restart.
+
+![Data Sources tab](documents/images/qprime_data_sources.png)
+
+### Sensor dashboard — what the deployment is sensing right now
+
+The operational view at <http://localhost:3000>: current soil condition,
+intruder detections, smoke alarms, door openings, temperature and humidity, over
+a selectable time range, plus a per-device event breakdown. Every tile is a live
+read of the `qprime.continuum` SQL surface, so it reflects records from both
+tiers at once.
+
+![Sensor dashboard](documents/images/sensor_dashboard.png)
+
+The Fall Count and AQI tiles stay at `-1` because no device in the paper's
+testbed reports either; every other tile is live.
+
+### Query assistant — ask across both tiers in English or SQL
+
+<http://localhost:3000/queries> turns a question into read-only SQL against the
+single logical table, runs it, and summarises the answer. Each answer reports
+how many records came from the edge and how many from the cloud, and the
+generated SQL and raw rows are one click away. Scope any question to the edge,
+the cloud, or the whole continuum.
+
+![Natural-language queries](documents/images/assistant_chat.png)
+
+### Overview — where the data actually landed
+
+The headline split. How many records were processed, how many were stored at the
+edge, how many were recommended for the cloud, how many carry PII, and how much
+cloud-bound data is being retained locally because no AWS backend is configured
+yet.
+
+![Placement overview](documents/images/qprime_overview.png)
+
+### QoC Factors — the five scores behind every decision
+
+Timeliness, completeness, correctness, resolution and significance, evaluated
+per record against per-stream latency thresholds and JSON schemas, tracked over
+time and averaged per device. After a device's first record Q-PRIME switches to
+a persistent adaptive baseline: the latency threshold follows an EWMA of
+observed delay rather than a fixed constant. This is the tab to watch while you
+change a sensor's settings on the Data Sources tab.
+
+![QoC factors](documents/images/qprime_qoc_factors.png)
+
+### Decisions — why each individual record went where it went
+
+One row per placement: both scores, the effective weight profile and version,
+the reason, the actual storage backend, and which entry point the record arrived
+through — `direct` for API producers, `edgex` for devices. Records pinned by
+`privacy_filter: strict` show the override instead of a score comparison.
+
+![Placement decisions](documents/images/qprime_decisions.png)
+
+### Privacy — what PII exists and whether any of it left the edge
+
+PII is detected from record payloads: identities, names, ages, SSNs, and person
+detections from vision streams. This tab counts how many PII-carrying records
+exist per device and how many ever reached a *configured* cloud backend.
+
+![Privacy statistics](documents/images/qprime_privacy.png)
+
+### Configuration — the weights that drive placement, and the AWS target
+
+Criteria weights resolve per device → per stream → global. Choose direct
+per-stream weights (the paper's default), one global triple, or a global
+Analytic Hierarchy Process matrix built from Saaty pairwise comparisons, with
+its consistency ratio reported and enforced at ≤ 0.10. Every change is versioned
+and audited. The same tab configures AWS cloud storage — credentials are
+encrypted before storage and never returned to the page.
+
+![Criteria weights and cloud configuration](documents/images/qprime_configuration.png)
+
+### Sensitivity — what different weights would have done
+
+Replay every logged decision under different criteria weights without
+re-ingesting or moving any data. The fastest way to show what the privacy term
+is actually buying you: the run below drops privacy and temporal weight entirely
+and replays the same records.
+
+![Sensitivity explorer](documents/images/qprime_sensitivity.png)
+
+### Performance — the overhead, measured rather than asserted
+
+Placement and query latency are recorded for every operation and retained, so
+the cost of the decision path is observable.
+
+![Performance](documents/images/qprime_performance.png)
+
+---
+
+## Generated demonstration data
+
+The **Data Sources** tab offers two mutually exclusive, user-started modes.
+Both are Off after startup and after restart; existing MongoDB records are
+retained.
+
+> **On generated modes.** The decision engine, QoC scoring, privacy analysis and
+> placement are the real implementation — only the chosen device readings are
+> generated. See [services/devices/README.md](services/devices/README.md).
+
+The figures below come from one such run of the bundled ten-device testbed and
+are illustrative, not data produced automatically by a fresh deployment.
+
+| Measure | Result |
+|---|---|
+| Records processed | 249,443 |
+| Placed at edge | 189,139 (76%) |
+| Placed in cloud | 60,304 (24%) |
+| PII-carrying records | 97,921 |
+| **PII records placed in the cloud tier** | **0** |
+| Placement decision latency | 8.2 ms mean over the last 500 placements |
+| Continuum query latency | 1.3 s mean over the last 500 queries |
+
+Not one PII-carrying record was *recommended* for the cloud, so none was written
+to any cloud backend. The dashboard's "leak rate" is stricter still — it counts
+only records that reached a configured AWS backend.
+
+Replaying those same decisions with the privacy and temporal terms removed
+(content-only weights) changes **163,960 of 249,487 placements** and sends
+**82,962 PII records** to the cloud. Re-enabling the paper's strict-all-PII
+mitigation on top of the same content-only weights returns that to **0**. The
+privacy term is doing real work, and the explorer lets you demonstrate it in one
+click.
 
 ---
 
@@ -204,6 +222,17 @@ question -> NLP -> read-only SQL -> PrestoDB / Athena -> answer and charts
 Q-PRIME never moves retained fallback records into AWS. Once AWS is configured,
 new cloud decisions are written there and cloud queries are sent there; earlier
 fallback records remain in MongoDB for history and visualisation.
+
+| Service | URL | Purpose |
+|---|---|---|
+| Q-PRIME dashboard | <http://localhost:3000/qprime> | QoC, placements, privacy, weights, sensitivity, performance |
+| Query application | <http://localhost:3000> | Natural-language / SQL queries and device charts |
+| Core API | <http://localhost:5005> | Ingestion, paper algorithms, persistence, query routing |
+| NLP API | <http://localhost:5500> | Natural language to SQL and result summarisation |
+| PrestoDB | <http://localhost:8085> | SQL over MongoDB and the continuum union |
+| MongoDB 8 | `localhost:27017` | Edge records, cloud fallback, policies, decisions, audit |
+| EdgeX 4.0.2 | `localhost:59880–59890` | Real-device integration and event export |
+| EdgeX Console | <http://localhost:4000> | Device, profile, service and event management |
 
 ---
 
@@ -275,10 +304,8 @@ MongoDB database `qprime` contains:
 - `qoc_baselines` — persistent adaptive QoC state;
 - `query_metrics` — query latency and source evidence.
 
-Configuration resolution is `device → stream → global`. The Configuration tab
-provides structured controls for per-stream and global direct weights, plus the
-three-criterion AHP pairwise matrix. Saving a profile activates it for future
-records; it does not move or recompute existing ones.
+Configuration resolution is `device → stream → global`. Saving a profile
+activates it for future records; it does not move or recompute existing ones.
 
 ---
 
@@ -303,6 +330,12 @@ curl -G http://localhost:5005/api/query \
                           FROM qprime.continuum GROUP BY resource.device_name" \
   --data-urlencode "isCloud=continuum"
 ```
+
+`timestamp` is an indexed epoch-seconds `bigint`. Compare it directly — for
+example `timestamp >= CAST(to_unixtime(now() - INTERVAL '1' HOUR) AS BIGINT)` —
+so the bound is pushed down into MongoDB. Wrapping the column in a function
+(`FROM_UNIXTIME(timestamp) >= …`) hides it from the connector and forces
+PrestoDB to scan and buffer every document in both collections instead.
 
 When Athena is the active cloud source, cloud SQL is rewritten internally from
 `qprime.continuum` to the configured Athena database and table. A single
@@ -352,6 +385,8 @@ GET  /api/config/history
 POST /api/config/ahp
 GET|PUT /api/cloud/config
 POST /api/cloud/config/probe
+GET  /api/producer/{catalog,status}
+POST /api/producer/{start,stop}
 GET  /api/results/{overview,decisions,qoc,privacy,performance}
 POST /api/results/sensitivity
 ```
@@ -384,7 +419,8 @@ npm run dev
 | A host port is already allocated | Override it in `.env` — every published port is configurable. Presto defaults to 8085 and the EdgeX MQTT broker to 1884 to stay clear of common conflicts. |
 | `Conflict. The container name ... is already in use` | Another stack is using the name. All containers here are prefixed `qprime-`; remove the conflicting container or rename it. |
 | `network ... has incorrect label` | A stale network from an older Compose project claiming the same name. `docker network rm <name>`, then bring the stack up again. |
-| Dashboards show zeros | The feed waits for the core to report healthy. Check `docker compose logs qprime-devices`. |
+| Dashboards show zeros | No data source is running. Open **Data Sources** and start one; the feed also waits for the core to report healthy — check `docker compose logs qprime-devices`. |
+| Sensor tiles and charts are blank while data *is* being produced | The SQL engine has run out of memory and restarted, so the queries behind them returned 502. `docker inspect qprime-presto --format '{{.RestartCount}}'` — anything above 0 confirms it. Give it more heap in [infra/presto/etc/jvm.config](infra/presto/etc/jvm.config), and make sure any custom SQL filters `timestamp` directly rather than through `FROM_UNIXTIME(...)`. |
 | `Q-PRIME API unavailable` in the UI | The core is still starting. `docker compose ps` — wait for `qprime-analysis` to be `healthy`. |
 | EdgeX containers restarting | EdgeX needs its Postgres and message bus first. They are health-gated, but a very slow first boot can take a few minutes. |
 | Want a clean slate | `docker compose down -v` deletes all stored records, decisions and policy history. |
@@ -395,7 +431,7 @@ npm run dev
 
 ```text
 docker-compose.yml   # the entire stack, zero configuration
-infra/presto/        # PrestoDB MongoDB connector configuration
+infra/presto/        # PrestoDB MongoDB connector and memory configuration
 services/core/       # paper algorithms, ingestion, placement, persistence, query API
 services/devices/    # bundled synthetic device feed (demonstration only)
 services/nlp/        # natural-language SQL generation and summarisation

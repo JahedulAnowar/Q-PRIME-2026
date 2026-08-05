@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -22,7 +22,7 @@ export const useMistyData = ({
             setLoading(true);
             setError(null);
 
-            const query = `SELECT COUNT(*) as intruders FROM ${SQL_TABLE} WHERE contextAttribute = 'misty_vision' AND contextValue.event = '${eventType}' AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${timeRange}' HOUR AND FROM_UNIXTIME(timestamp) < NOW();`;
+            const query = `SELECT COUNT(*) as intruders FROM ${SQL_TABLE} WHERE contextAttribute = 'misty_vision' AND contextValue.event = '${eventType}' AND ${timeWindowSql(timeRange)};`;
 
             // Q-PRIME core: continuum query API
             const response = await fetch(withBasePath("/api/dashboard/misty"), {

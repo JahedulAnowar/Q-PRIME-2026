@@ -147,13 +147,20 @@ def zed_value(heartbeat):
 
 
 def misty_value(heartbeat):
+    """Face recognition. An unrecognised face is an intruder.
+
+    ``intruder_detected`` is the vocabulary the rest of the stack already
+    speaks — the dashboard's Intruders tile, the stacked-bar labels and the
+    NLP service's intruder templates all match on it. Emitting
+    ``unknown_face_detected`` instead left every one of them reading zero.
+    """
     known = random.random() < 0.65
     return {
         "distance": random.randint(30, 240),
         "event": "heartbeat"
         if heartbeat
-        else ("familiar_face_detected" if known else "unknown_face_detected"),
-        "person": _person() if known else "unknown",
+        else ("familiar_face_detected" if known else "intruder_detected"),
+        "person": _person() if known else "unknown person",
         "pitch": random.randint(-20, 20),
         "yaw": random.randint(-45, 45),
     }
