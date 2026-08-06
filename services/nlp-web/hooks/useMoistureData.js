@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -19,14 +19,8 @@ export const useMoistureData = ({
     // Query for hourly moisture stats
     const query = `SELECT *
         FROM ${SQL_TABLE}
-        WHERE device_name IN ('Soil Moisture Sensor 1', 'SoilMoisture_1')
-        AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-        AND FROM_UNIXTIME(timestamp) < NOW();`;
-
-    const queryEdge = `SELECT *
-        FROM ${SQL_TABLE}
-        AND to_timestamp(timestamp) >= NOW() - INTERVAL '${hours}' hour
-        AND to_timestamp(timestamp) < NOW()
+        WHERE resource.device_name IN ('Soil Moisture Sensor 1', 'SoilMoisture_1')
+        AND ${timeWindowSql(hours)}
         ORDER BY timestamp DESC;`;
 
     const fetchMoistureStats = useCallback(async () => {

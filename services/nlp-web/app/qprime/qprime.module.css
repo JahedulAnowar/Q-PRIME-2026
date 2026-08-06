@@ -139,6 +139,14 @@
   box-shadow: 0 3px 8px rgb(153 0 51 / 18%);
 }
 
+.dataSourcesTab {
+  margin-left: auto;
+  border-color: #e0a5bd !important;
+  color: #990033 !important;
+}
+
+.content nav .dataSourcesTab.active { color: #fff !important; }
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -338,6 +346,66 @@
   line-height: 1.55;
 }
 
+.producerStatus { margin-top: 18px; }
+
+.modeCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.modeCard,
+.sensorControl {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.modeCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  padding: 15px;
+  cursor: pointer;
+}
+
+.modeCard input { grid-row: span 2; accent-color: #990033; margin-top: 3px; }
+.modeCard strong { color: #334155; }
+.modeCard span { color: #64748b; font-size: 13px; line-height: 1.45; margin-top: 4px; }
+.modeSelected { border-color: #990033; background: #fff7fa; box-shadow: 0 0 0 2px rgb(153 0 51 / 8%); }
+
+.sensorControls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 12px;
+}
+
+.sensorControl { padding: 13px; }
+.sensorEnabled { border-color: #e0a5bd; background: #fffafd; }
+.sensorHeading { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.sensorHeading input { accent-color: #990033; }
+.sensorHeading span { display: grid; gap: 2px; }
+.sensorHeading strong { color: #334155; font-size: 14px; }
+.sensorHeading small { color: #64748b; font-size: 12px; }
+.sensorFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.sensorFields label { display: grid; gap: 5px; color: #64748b; font-size: 12px; font-weight: 600; }
+.sensorFields input,
+.sensorFields select { min-width: 0; border: 1px solid #dbe1ea; border-radius: 7px; padding: 8px; background: #fff; color: #1e293b; }
+
+.consoleButton {
+  display: inline-block;
+  border-radius: 8px;
+  padding: 10px 15px;
+  background: #990033;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 3px 8px rgb(153 0 51 / 16%);
+}
+
+.consoleButton:hover { background: #7f002a; }
+
 .cloudForm { display: grid; gap: 16px; }
 .cloudForm label,
 .cloudForm legend {
@@ -533,6 +601,7 @@
   .header span { display: none; }
   .content nav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .content nav button { flex: 0 0 auto; }
+  .dataSourcesTab { margin-left: 0; }
   .panel { padding: 16px; }
   .panelTitle { align-items: flex-start; flex-direction: column; gap: 4px; }
   .actions { align-items: flex-start; flex-direction: column; }

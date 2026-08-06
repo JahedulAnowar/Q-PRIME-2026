@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -26,8 +26,7 @@ export const useTHPData = ({
             const query = `SELECT timestamp, resource.device_name, contextattribute, contextvalue
                 FROM ${SQL_TABLE}
                 WHERE resource.device_name = 'LabTHPSensor'
-                AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-                AND FROM_UNIXTIME(timestamp) < NOW()
+                AND ${timeWindowSql(hours)}
                 ORDER BY timestamp DESC;`;
 
             const response = await fetch(withBasePath("/api/dashboard/thp"), {

@@ -18,6 +18,38 @@ PRESTO_URL = os.getenv("PRESTO_URL", "http://presto:8080")
 QUERY_MAX_ROWS = int(os.getenv("QUERY_MAX_ROWS", "1000"))
 QUERY_TIMEOUT_S = int(os.getenv("QUERY_TIMEOUT_S", "60"))
 
+# Columns the logical `qprime.continuum` table must never expose.
+#
+# `canonical_json` holds the full nested record, and the PrestoDB MongoDB
+# connector maps it to a `json` type it cannot serialise back to a client. Any
+# query that reached it — including a plain `SELECT *` — failed with
+# "Unhandled type for Slice: json", which broke every dashboard card that
+# issues `SELECT *`. The full record stays available in MongoDB and through the
+# core's own REST endpoints.
+UNSUPPORTED_COLUMNS = frozenset({"canonical_json"})
+
+# Fallback projection, in the order written by `pipeline._record_document`, used
+# only when Presto cannot be introspected. The connector infers its schema by
+# sampling documents, so the real column set is authoritative and is read from
+# `information_schema` at runtime — `fallback_reason`, for instance, is absent
+# whenever the sampled edge record left it null.
+DEFAULT_CONTINUUM_COLUMNS = (
+    "record_id",
+    "entity",
+    "contextattribute",
+    "contextvalue",
+    "resource",
+    "timestamp",
+    "ingested_at",
+    "refreshrate",
+    "source",
+    "recommended_tier",
+    "storage_location",
+    "actual_backend",
+    "cloud_fallback",
+    "pii_detected",
+)
+
 
 def normalize_scope(value: Any) -> str:
     text = str(value or "continuum").strip().lower()
@@ -40,6 +72,7 @@ class QueryRouter:
     ):
         self.repository = repo or repository
         self.cloud = cloud or cloud_adapter
+        self._column_cache: Dict[str, Tuple[str, ...]] = {}
 
     def health(self) -> Dict[str, Any]:
         parsed = urlparse(PRESTO_URL)
@@ -88,10 +121,17 @@ class QueryRouter:
             sources = ["presto:mongodb.edge_records", "athena"]
             source = "federated"
         else:
-            edge_results = self._presto(self._rewrite(expression, "edge_records"))
-            cloud_results = self._presto(self._rewrite(expression, "cloud_records"))
             results = self._presto(self._rewrite_continuum(expression))
-            edge_rows, cloud_rows = len(edge_results), len(cloud_results)
+            # The per-tier executions exist only to report how much of the
+            # answer came from each tier. For an aggregate that split counts
+            # aggregate rows rather than records, so it is neither meaningful
+            # nor displayed — and running the statement three times over both
+            # collections is exactly the load that used to exhaust Presto.
+            if self._aggregated(expression):
+                edge_rows = cloud_rows = 0
+            else:
+                edge_rows = len(self._presto(self._rewrite(expression, "edge_records")))
+                cloud_rows = len(self._presto(self._rewrite(expression, "cloud_records")))
             sources = ["presto:mongodb.edge_records", "presto:mongodb.cloud_records"]
 
         elapsed = round((time.perf_counter() - started) * 1000, 3)
@@ -139,10 +179,18 @@ class QueryRouter:
         for table in expression.find_all(exp.Table):
             if not self._is_logical(table):
                 raise QueryValidationError("query may only access the Q-PRIME logical table")
-        if not any(expression.find(kind) for kind in (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)):
+        if not self._aggregated(expression):
             if expression.args.get("limit") is None:
                 expression = expression.limit(QUERY_MAX_ROWS)
         return expression
+
+    @staticmethod
+    def _aggregated(expression: exp.Expression) -> bool:
+        """True when rows are summarised rather than returned one per record."""
+        return any(
+            expression.find(kind)
+            for kind in (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)
+        )
 
     @staticmethod
     def _is_logical(table: exp.Table) -> bool:
@@ -154,32 +202,82 @@ class QueryRouter:
     def _physical_table(collection: str) -> exp.Table:
         return exp.to_table(f"mongodb.qprime.{collection}")
 
+    def _discover_columns(self, collection: str) -> Tuple[str, ...]:
+        """Serialisable columns of one physical collection, as Presto sees them.
+
+        The MongoDB connector infers its schema from sampled documents, so the
+        column set is discovered rather than assumed. Successful lookups are
+        cached; an empty result is not, so a collection that Presto has not
+        sampled yet is retried on the next query.
+        """
+        cached = self._column_cache.get(collection)
+        if cached:
+            return cached
+        try:
+            rows = self._presto(
+                "SELECT column_name FROM mongodb.information_schema.columns "
+                f"WHERE table_schema = 'qprime' AND table_name = '{collection}'"
+            )
+            columns = tuple(
+                str(row["column_name"])
+                for row in rows
+                if str(row.get("column_name", "")) not in UNSUPPORTED_COLUMNS
+            )
+        except Exception:
+            columns = ()
+        if columns:
+            self._column_cache[collection] = columns
+        return columns
+
+    def _columns(self, collection: str) -> Tuple[str, ...]:
+        return self._discover_columns(collection) or DEFAULT_CONTINUUM_COLUMNS
+
+    def _continuum_columns(self) -> Tuple[str, ...]:
+        """Columns common to both collections, so the UNION ALL stays valid."""
+        edge = self._discover_columns("edge_records")
+        cloud = self._discover_columns("cloud_records")
+        if edge and cloud:
+            shared = set(cloud)
+            common = tuple(name for name in edge if name in shared)
+            if common:
+                return common
+        return edge or cloud or DEFAULT_CONTINUUM_COLUMNS
+
+    def _projection(self, collection: str, columns: Optional[Tuple[str, ...]] = None) -> exp.Select:
+        """SELECT the supported continuum columns from one physical collection."""
+        return exp.select(*(columns or self._columns(collection))).from_(
+            self._physical_table(collection)
+        )
+
+    @staticmethod
+    def _as_source(select: exp.Select, alias_name: str) -> exp.Subquery:
+        return exp.Subquery(
+            this=select,
+            alias=exp.TableAlias(this=exp.to_identifier(alias_name)),
+        )
+
     def _rewrite(self, expression: exp.Expression, collection: str) -> str:
         rewritten = expression.copy()
         for table in list(rewritten.find_all(exp.Table)):
             if self._is_logical(table):
-                replacement = self._physical_table(collection)
-                if table.alias:
-                    replacement.set("alias", table.args.get("alias"))
-                table.replace(replacement)
+                alias_name = table.alias_or_name or LOGICAL_TABLE
+                table.replace(
+                    self._as_source(self._projection(collection), alias_name)
+                )
         return rewritten.sql(dialect="presto")
 
     def _rewrite_continuum(self, expression: exp.Expression) -> str:
         rewritten = expression.copy()
+        columns = self._continuum_columns()
         union = exp.union(
-            exp.select("*").from_(self._physical_table("edge_records")),
-            exp.select("*").from_(self._physical_table("cloud_records")),
+            self._projection("edge_records", columns),
+            self._projection("cloud_records", columns),
             distinct=False,
         )
         for table in list(rewritten.find_all(exp.Table)):
             if self._is_logical(table):
-                alias_name = table.alias_or_name or "continuum"
-                table.replace(
-                    exp.Subquery(
-                        this=union.copy(),
-                        alias=exp.TableAlias(this=exp.to_identifier(alias_name)),
-                    )
-                )
+                alias_name = table.alias_or_name or LOGICAL_TABLE
+                table.replace(self._as_source(union.copy(), alias_name))
         return rewritten.sql(dialect="presto")
 
     def _athena_sql(self, expression: exp.Expression) -> str:

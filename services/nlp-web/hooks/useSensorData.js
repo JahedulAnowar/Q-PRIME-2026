@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, todayWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -16,12 +16,7 @@ export const useDeviceStats = ({ databaseLayer, autoRefreshInterval = 0 }) => {
     // Query for unique devices today
     const query = `SELECT COUNT(DISTINCT resource.device_name) as unique_devices_today
         FROM ${SQL_TABLE}
-        WHERE date_format(from_unixtime(timestamp), '%Y-%m-%d') = date_format(current_date, '%Y-%m-%d');`;
-
-    // Fix Edge Layer SQL command later
-    const queryEdge = `SELECT COUNT(DISTINCT resource.device_name) as unique_devices_today
-        FROM ${SQL_TABLE}
-        WHERE date_format(from_unixtime(timestamp), '%Y-%m-%d') = date_format(current_date, '%Y-%m-%d')`;
+        WHERE ${todayWindowSql()};`;
 
     const fetchDeviceStats = useCallback(async () => {
         try {

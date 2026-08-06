@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-import { SQL_TABLE } from "@/lib/sql";
+import { SQL_TABLE, timeWindowSql } from "@/lib/sql";
 
 import { withBasePath } from "@/lib/basePath";
 
@@ -25,15 +25,8 @@ export const useSmokeData = ({
             // Query for hourly smoke stats
             const query = `SELECT *
                 FROM ${SQL_TABLE}
-                WHERE device_name IN ('Smoke Sensor 1', 'Lab Smoke Sensor', 'SmokeDetector_1')
-                AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-                AND FROM_UNIXTIME(timestamp) < NOW();`;
-
-            // Fix Edge Layer SQL command later
-            // const queryEdge = `SELECT *
-            //     FROM ${process.env.NEXT_PUBLIC_EDGE_SMOKE_TBL_NAME}
-            //     AND FROM_UNIXTIME(timestamp) >= NOW() - INTERVAL '${hours}' HOUR
-            //     AND FROM_UNIXTIME(timestamp) < NOW();`;
+                WHERE resource.device_name IN ('Smoke Sensor 1', 'Lab Smoke Sensor', 'SmokeDetector_1')
+                AND ${timeWindowSql(hours)};`;
 
             const response = await fetch(withBasePath("/api/dashboard/smoke"), {
                 method: "POST",

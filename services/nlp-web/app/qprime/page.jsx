@@ -9,7 +9,7 @@ import {
 import { withBasePath } from "@/lib/basePath";
 import styles from "./qprime.module.css";
 
-const TABS = ["Overview", "QoC Factors", "Decisions", "Privacy", "Configuration", "Sensitivity", "Performance"];
+const TABS = ["Overview", "QoC Factors", "Decisions", "Privacy", "Configuration", "Sensitivity", "Performance", "Data Sources"];
 const COLOURS = { edge: "#32c57a", cloud: "#4f8df7", both: "#f5a623" };
 const empty = { overview: {}, qoc: { timeline: [], mean_by_device: {} }, decisions: [], privacy: {}, performance: {} };
 const PAPER_STREAMS = ["camera_vision", "door", "heart", "misty_vision", "smoke", "soil", "tello_vision", "thp", "zed_vision"];
@@ -106,13 +106,61 @@ function Privacy({ data }) {
     return <><div className={styles.metrics}><Metric label="PII records" value={data.pii_records}/><Metric label="PII sent to configured AWS" value={data.pii_leaked_to_cloud} tone={data.pii_leaked_to_cloud ? "danger" : "edge"}/><Metric label="Leak rate" value={`${data.leak_rate || 0}%`}/><Metric label="Cloud fallback is local" value="MongoDB" tone="both"/></div><Panel title="PII placement per device"><ResponsiveContainer width="100%" height={350}><BarChart data={data.by_device || []}><CartesianGrid stroke="#e2e8f0"/><XAxis dataKey="device"/><YAxis allowDecimals={false}/><Tooltip/><Legend/><Bar dataKey="pii_records" fill="#f5a623"/><Bar dataKey="leaked_to_cloud" fill="#e84455"/></BarChart></ResponsiveContainer></Panel></>;
 }
 
+function DataSources({ producer, catalog, onSaved, onModeChange }) {
+    const current = producer?.current || { mode: "off", running: false };
+    const saved = producer?.saved || { devices: [] };
+    const [mode, setMode] = useState(saved.mode === "simulator" ? "simulator" : "sample_edgex");
+    const [selected, setSelected] = useState(saved.devices || []);
+    const [message, setMessage] = useState(""); const [working, setWorking] = useState(false);
+    useEffect(() => { if (!current.running && saved.mode === "simulator") setSelected(saved.devices || []); }, [saved.updated_at, current.running]);
+    const selectedByName = Object.fromEntries(selected.map((device) => [device.device_name, device]));
+    function chooseMode(nextMode) { setMode(nextMode); onModeChange(nextMode); }
+    function toggle(device) {
+        setSelected((items) => items.some((item) => item.device_name === device.device_name)
+            ? items.filter((item) => item.device_name !== device.device_name)
+            : [...items, { device_name: device.device_name, interval_ms: 1000, refresh_rate_ms: device.refresh_rate, extra_latency_ms: 0, drop_field_pct: 0, corrupt_pct: 0, low_significance_pct: 0.1, privacy_filter: device.privacy_filter || false }]);
+    }
+    function update(name, key, value) { setSelected((items) => items.map((item) => item.device_name === name ? { ...item, [key]: value } : item)); }
+    async function start() {
+        if (mode === "simulator" && !selected.length) { setMessage("Select at least one sensor."); return; }
+        setWorking(true); try { await api("producer/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, devices: mode === "simulator" ? selected : [] }) }); setMessage(mode === "simulator" ? "Simulator started." : "Sample EdgeX feed started."); onSaved(); }
+        catch (error) { setMessage(error.message); } finally { setWorking(false); }
+    }
+    async function stop() { setWorking(true); try { await api("producer/stop", { method: "POST" }); setMessage("Generated data source stopped."); onSaved(); } catch (error) { setMessage(error.message); } finally { setWorking(false); } }
+    return <div className={styles.configStack}>
+        <Panel title="Data generation" subtitle="Off by default; choose one generated source at a time">
+            <div className={styles.modeCards}>
+                <label className={`${styles.modeCard} ${mode === "simulator" ? styles.modeSelected : ""}`}><input type="radio" checked={mode === "simulator"} onChange={() => chooseMode("simulator")}/><strong>Simulator</strong><span>Configure paper sensors and send direct records into Q-PRIME.</span></label>
+                <label className={`${styles.modeCard} ${mode === "sample_edgex" ? styles.modeSelected : ""}`}><input type="radio" checked={mode === "sample_edgex"} onChange={() => chooseMode("sample_edgex")}/><strong>Sample EdgeX feed</strong><span>Generate the paper testbed through EdgeX and the export pipeline.</span></label>
+            </div>
+            <div className={styles.actions}><button disabled={working} onClick={start}>{current.running ? "Switch to selected mode" : "Start selected mode"}</button>{current.running && <button className={styles.secondaryButton} disabled={working} onClick={stop}>Stop generation</button>}<span>{message || current.message || "Off"}</span></div>
+            <p className={`${styles.helpText} ${styles.producerStatus}`}>Current mode: <strong>{current.running ? current.mode.replace("_", " ") : "Off"}</strong> · delivered {current.sent || 0} · failed {current.failed || 0}.</p>
+        </Panel>
+        {mode === "simulator" && <Panel title="Simulator sensor configuration" subtitle="These controls affect only newly generated records">
+            <div className={styles.sensorControls}>{catalog.map((device) => { const settings = selectedByName[device.device_name]; return <article key={device.device_name} className={`${styles.sensorControl} ${settings ? styles.sensorEnabled : ""}`}><label className={styles.sensorHeading}><input type="checkbox" checked={!!settings} onChange={() => toggle(device)}/><span><strong>{device.device_name}</strong><small>{device.stream}</small></span></label>{settings && <div className={styles.sensorFields}>
+                <label>Interval (ms)<input type="number" min="100" value={settings.interval_ms} onChange={(e) => update(device.device_name, "interval_ms", Number(e.target.value))}/></label>
+                <label>Refresh rate (ms)<input type="number" min="1" value={settings.refresh_rate_ms} onChange={(e) => update(device.device_name, "refresh_rate_ms", Number(e.target.value))}/></label>
+                <label>Extra latency (ms)<input type="number" min="0" value={settings.extra_latency_ms} onChange={(e) => update(device.device_name, "extra_latency_ms", Number(e.target.value))}/></label>
+                <label>Drop fields (%)<input type="number" min="0" max="100" value={Math.round((settings.drop_field_pct || 0) * 100)} onChange={(e) => update(device.device_name, "drop_field_pct", Number(e.target.value) / 100)}/></label>
+                <label>Corrupt values (%)<input type="number" min="0" max="100" value={Math.round((settings.corrupt_pct || 0) * 100)} onChange={(e) => update(device.device_name, "corrupt_pct", Number(e.target.value) / 100)}/></label>
+                <label>Low significance (%)<input type="number" min="0" max="100" value={Math.round(settings.low_significance_pct * 100)} onChange={(e) => update(device.device_name, "low_significance_pct", Number(e.target.value) / 100)}/></label>
+                <label>Privacy filter<select value={String(settings.privacy_filter)} onChange={(e) => update(device.device_name, "privacy_filter", e.target.value === "strict" ? "strict" : e.target.value === "true")}><option value="false">Off</option><option value="true">On</option><option value="strict">Strict edge-only</option></select></label>
+            </div>}</article>; })}</div>
+        </Panel>}
+        {mode !== "simulator" && <Panel title="Real devices through EdgeX" subtitle="Manage registered device services separately from Q-PRIME">
+            <p className={styles.helpText}>Open the EdgeX Console to inspect services, device profiles, devices, commands, events, and readings. A physical device requires its compatible EdgeX device-service driver before it can appear here.</p>
+            <a className={styles.consoleButton} href="http://localhost:4000" target="_blank" rel="noreferrer">Open EdgeX Console ↗</a>
+        </Panel>}
+    </div>;
+}
+
 function CloudConfiguration({ cloud, onSaved }) {
-    const [form, setForm] = useState({ enabled: false, mode: "firehose", region: "", kinesis_stream: "", firehose_stream: "", athena_database: "", athena_table: "", athena_workgroup: "primary", athena_output: "", access_key_id: "", secret_access_key: "", session_token: "" });
+    const [form, setForm] = useState({ enabled: false, mode: "firehose", region: "", kinesis_stream: "", firehose_stream: "", athena_database: "", athena_table: "", athena_workgroup: "primary", athena_output: "", access_key_id: "", secret_access_key: "" });
     const [message, setMessage] = useState("");
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        setForm((current) => ({ ...current, ...Object.fromEntries(["enabled", "mode", "region", "kinesis_stream", "firehose_stream", "athena_database", "athena_table", "athena_workgroup", "athena_output"].map((key) => [key, cloud?.[key] ?? current[key]])), access_key_id: "", secret_access_key: "", session_token: "" }));
+        setForm((current) => ({ ...current, ...Object.fromEntries(["enabled", "mode", "region", "kinesis_stream", "firehose_stream", "athena_database", "athena_table", "athena_workgroup", "athena_output"].map((key) => [key, cloud?.[key] ?? current[key]])), access_key_id: "", secret_access_key: "" }));
     }, [cloud?.updated_at, cloud?.source]);
 
     function update(key, value) { setForm((current) => ({ ...current, [key]: value })); }
@@ -121,7 +169,7 @@ function CloudConfiguration({ cloud, onSaved }) {
         try {
             const saved = await api("cloud/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
             setMessage(`Saved and applied. Credentials are ${saved.access_key_configured ? "encrypted and stored" : "not configured"}.`);
-            setForm((current) => ({ ...current, access_key_id: "", secret_access_key: "", session_token: "" })); onSaved();
+            setForm((current) => ({ ...current, access_key_id: "", secret_access_key: "" })); onSaved();
         } catch (error) { setMessage(error.message); } finally { setSaving(false); }
     }
     async function probe() {
@@ -143,7 +191,6 @@ function CloudConfiguration({ cloud, onSaved }) {
             <fieldset><legend>Static AWS credentials</legend><div className={styles.cloudGrid}>
                 <label>Access key ID<input autoComplete="off" value={form.access_key_id} onChange={(e) => update("access_key_id", e.target.value)} placeholder={cloud?.access_key_configured ? "Configured — enter to replace" : "AKIA..."}/></label>
                 <label>Secret access key<input type="password" autoComplete="new-password" value={form.secret_access_key} onChange={(e) => update("secret_access_key", e.target.value)} placeholder={cloud?.access_key_configured ? "Configured — enter to replace" : "Paste secret key"}/></label>
-                <label>Session token <small>Optional</small><input type="password" autoComplete="new-password" value={form.session_token} onChange={(e) => update("session_token", e.target.value)} placeholder={cloud?.session_token_configured ? "Configured — enter to replace" : "Temporary-credential token"}/></label>
             </div></fieldset>
             <details className={styles.athena}><summary>Athena query settings <span>Optional, needed for Cloud queries</span></summary><div className={styles.cloudGrid}>
                 <label>Database<input value={form.athena_database} onChange={(e) => update("athena_database", e.target.value)} placeholder="qprime"/></label><label>Table<input value={form.athena_table} onChange={(e) => update("athena_table", e.target.value)} placeholder="continuum"/></label><label>Workgroup<input value={form.athena_workgroup} onChange={(e) => update("athena_workgroup", e.target.value)} placeholder="primary"/></label><label>Athena results S3 URI<input value={form.athena_output} onChange={(e) => update("athena_output", e.target.value)} placeholder="s3://bucket/athena-results/"/></label>
@@ -228,11 +275,11 @@ function Configuration({ config, cloud, onSaved }) {
     const ahpInvalid = weightMode === "global_ahp" && (!ahpPreview || !ahpPreview.consistent);
     return <div className={styles.configStack}>
       <div className={styles.gridConfig}>
-        <Panel title="Criteria weights" subtitle="Controls the live Edge / Cloud / Both placement score">
+        <Panel title="Criteria weights" subtitle="Controls the live placement score">
             <p className={styles.helpText}>Choose how Q-PRIME weights temporal QoC, content QoC, and privacy. This privacy criterion is separate from a record’s privacy sensitivity score.</p>
             <div className={styles.formRow}><label>Profile scope<select value={scope} onChange={(e) => setScope(e.target.value)}><option value="global">Global</option><option value="stream">One paper stream</option><option value="device">One device</option></select></label>{scope === "device" ? <label>Device selector<input value={selector} onChange={(e) => setSelector(e.target.value)} placeholder="device name or ID"/></label> : scope === "stream" ? <label>Profile stream<select value={stream} onChange={(e) => selectStream(e.target.value)}>{PAPER_STREAMS.map((key) => <option key={key} value={key}>{key.replace("_", " ")}</option>)}</select></label> : <label>Applies to<input value="All incoming records" disabled/></label>}</div>
             <div className={styles.modeGrid}>
-                <label className={weightMode === "per_sensor" ? styles.modeActive : ""}><input type="radio" name="weight-mode" value="per_sensor" checked={weightMode === "per_sensor"} onChange={(e) => selectWeightMode(e.target.value)}/><strong>Per paper stream</strong><span>Use a different direct weighting for each known stream.</span></label>
+                <label className={weightMode === "per_sensor" ? styles.modeActive : ""}><input type="radio" name="weight-mode" value="per_sensor" checked={weightMode === "per_sensor"} onChange={(e) => selectWeightMode(e.target.value)}/><strong>Per data stream</strong><span>Use a different direct weighting for each known stream.</span></label>
                 <label className={weightMode === "global_direct" ? styles.modeActive : ""}><input type="radio" name="weight-mode" value="global_direct" checked={weightMode === "global_direct"} onChange={(e) => selectWeightMode(e.target.value)}/><strong>Global direct</strong><span>Use one direct weighting for all matching records.</span></label>
                 <label className={weightMode === "global_ahp" ? styles.modeActive : ""}><input type="radio" name="weight-mode" value="global_ahp" checked={weightMode === "global_ahp"} onChange={(e) => selectWeightMode(e.target.value)}/><strong>AHP pairwise matrix</strong><span>Derive global weights from Saaty comparisons.</span></label>
             </div>
@@ -277,18 +324,18 @@ function Performance({ data }) {
 
 export default function QPrimePage() {
     const [tab, setTab] = useState("Overview"); const [data, setData] = useState(empty);
-    const [health, setHealth] = useState({}); const [config, setConfig] = useState({ active_profiles: [] }); const [cloud, setCloud] = useState({});
+    const [health, setHealth] = useState({}); const [config, setConfig] = useState({ active_profiles: [] }); const [cloud, setCloud] = useState({}); const [producer, setProducer] = useState({}); const [catalog, setCatalog] = useState([]); const [sourceMode, setSourceMode] = useState("sample_edgex");
     const [error, setError] = useState(""); const [loading, setLoading] = useState(true);
     const refresh = useCallback(async () => {
         try {
-            const [h, o, q, d, p, perf, cfg, cloudConfig] = await Promise.all([api("health"), api("results/overview"), api("results/qoc"), api("results/decisions?limit=250"), api("results/privacy"), api("results/performance"), api("config"), api("cloud/config")]);
-            setHealth(h); setData({ overview: o, qoc: q, decisions: d.decisions || [], privacy: p, performance: perf }); setConfig(cfg); setCloud(cloudConfig); setError("");
+            const [h, o, q, d, p, perf, cfg, cloudConfig, producerStatus, producerCatalog] = await Promise.all([api("health"), api("results/overview"), api("results/qoc"), api("results/decisions?limit=250"), api("results/privacy"), api("results/performance"), api("config"), api("cloud/config"), api("producer/status"), api("producer/catalog")]);
+            setHealth(h); setData({ overview: o, qoc: q, decisions: d.decisions || [], privacy: p, performance: perf }); setConfig(cfg); setCloud(cloudConfig); setProducer(producerStatus); setCatalog(producerCatalog.devices || []); setSourceMode(producerStatus.saved?.mode === "simulator" ? "simulator" : "sample_edgex"); setError("");
         } catch (e) { setError(e.message); } finally { setLoading(false); }
     }, []);
     useEffect(() => { refresh(); const timer = setInterval(refresh, 10000); return () => clearInterval(timer); }, [refresh]);
     return <main className={styles.shell}>
-        <header className={styles.header}><div className={styles.brand}><div className={styles.brandMark}>Q</div><div><strong>Q-PRIME</strong><span>Paper implementation · live QoC and placement analytics</span></div></div><div className={styles.status}><StatusBadge label="Core" status={health.status}/><StatusBadge label="EdgeX" status={health.edgex?.status}/><StatusBadge label="MongoDB" status={health.mongodb?.status}/><StatusBadge label="Cloud" status={health.cloud?.status}/><Link href={withBasePath("/")}>Sensor Dashboard</Link></div></header>
-        <div className={styles.content}><nav>{TABS.map((name) => <button key={name} className={tab === name ? styles.active : ""} onClick={() => setTab(name)}>{name}</button>)}</nav>{error && <div className={styles.error}>{error}</div>}{loading ? <div className={styles.loading}>Loading Q-PRIME results…</div> : <>{tab === "Overview" && <Overview data={data.overview}/>} {tab === "QoC Factors" && <QoC data={data.qoc}/>} {tab === "Decisions" && <Decisions rows={data.decisions}/>} {tab === "Privacy" && <Privacy data={data.privacy}/>} {tab === "Configuration" && <Configuration config={config} cloud={cloud} onSaved={refresh}/>} {tab === "Sensitivity" && <Sensitivity/>} {tab === "Performance" && <Performance data={data.performance}/>}</>}</div>
+        <header className={styles.header}><div className={styles.brand}><div className={styles.brandMark}>Q</div><div><strong>Q-PRIME</strong><span>Live QoC and placement analytics</span></div></div><div className={styles.status}><StatusBadge label="Core" status={health.status}/><StatusBadge label="EdgeX" status={health.edgex?.status}/><StatusBadge label="MongoDB" status={health.mongodb?.status}/><StatusBadge label="Cloud" status={health.cloud?.status}/>{sourceMode !== "simulator" && <a href="http://localhost:4000" target="_blank" rel="noreferrer">Open EdgeX Console ↗</a>}<Link href={withBasePath("/")}>Sensor Dashboard</Link></div></header>
+        <div className={styles.content}><nav>{TABS.map((name) => <button key={name} className={`${tab === name ? styles.active : ""} ${name === "Data Sources" ? styles.dataSourcesTab : ""}`} onClick={() => setTab(name)}>{name}</button>)}</nav>{error && <div className={styles.error}>{error}</div>}{loading ? <div className={styles.loading}>Loading Q-PRIME results…</div> : <>{tab === "Overview" && <Overview data={data.overview}/>} {tab === "QoC Factors" && <QoC data={data.qoc}/>} {tab === "Decisions" && <Decisions rows={data.decisions}/>} {tab === "Privacy" && <Privacy data={data.privacy}/>} {tab === "Data Sources" && <DataSources producer={producer} catalog={catalog} onSaved={refresh} onModeChange={setSourceMode}/>} {tab === "Configuration" && <Configuration config={config} cloud={cloud} onSaved={refresh}/>} {tab === "Sensitivity" && <Sensitivity/>} {tab === "Performance" && <Performance data={data.performance}/>}</>}</div>
         <footer>Q-PRIME · A Quality- and Privacy-Aware Edge–Cloud Continuum Framework for IoT Applications</footer>
     </main>;
 }

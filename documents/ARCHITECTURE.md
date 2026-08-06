@@ -1,17 +1,20 @@
 # Architecture
 
-Q-PRIME is the paper implementation that begins after a producer has created
-a raw context record. It does not generate device traffic. The same pipeline
-processes a direct producer record and an EdgeX event, so both receive the
-same QoC evaluation, privacy checks, weighting, placement decision, and
-persistent evidence.
+Q-PRIME is the paper implementation that processes raw context records. It
+accepts external producers and real EdgeX devices, and includes two optional,
+user-started demonstration producers. The same pipeline processes direct and
+EdgeX records, so both receive the same QoC evaluation, privacy checks,
+weighting, placement decision, and persistent evidence.
 
 ```mermaid
 flowchart TB
-    subgraph Input[External inputs]
+    subgraph Input[Inputs and user-started sources]
         Direct[External producer<br/>POST /api/ingest]
+        Simulator[Simulator<br/>user-started, direct]
+        Sample[Sample EdgeX Feed<br/>user-started]
         Device[Real device or gateway]
         EdgeX[EdgeX Foundry]
+        Sample --> EdgeX
         Device --> EdgeX
     end
 
@@ -27,6 +30,7 @@ flowchart TB
     end
 
     Direct -->|POST /api/ingest| CoreApi
+    Simulator -->|POST /api/ingest| CoreApi
     EdgeX -->|HTTP export<br/>/api/ingest/edgex| CoreApi
 
     subgraph Persistence[Placement and persistent evidence]
@@ -55,6 +59,7 @@ flowchart TB
     Web -->|natural-language query| NLP --> Router
     Web -->|SQL query| Router
     Web -->|results and configuration APIs| CoreApi
+    Web -->|new tab| Console[EdgeX Console<br/>localhost:4000]
     Router --> Presto
     Router -->|AWS Cloud is configured| Athena
     AWS --> Athena
@@ -66,6 +71,22 @@ A direct producer posts a canonical record to `/api/ingest`. A real-device
 integration sends an EdgeX event, which the bundled HTTP-export service
 forwards to `/api/ingest/edgex`. Q-PRIME normalises either payload, creates or
 uses a stable record identifier, and ignores repeated deliveries.
+
+## Generated sources and EdgeX management
+
+The Q-PRIME dashboard is also the control plane for optional generated inputs.
+Its **Data Sources** tab begins in **Off** mode. A user can start either the
+direct Simulator (with per-sensor timing, QoC degradation and privacy settings)
+or the Sample EdgeX Feed (the paper testbed flowing through EdgeX), never both.
+The selected configuration is stored in MongoDB, but running state is never
+restored after a restart. This prevents a deployed stack from creating data
+without an explicit user action.
+
+The dashboard's **Open EdgeX Console** link opens EdgeX's official management
+UI in a separate tab. It is used to inspect and configure registered EdgeX
+device services, profiles, devices, readings and commands. To connect physical
+hardware, the user must also deploy the compatible EdgeX device-service driver;
+the Console is a manager, not a universal hardware driver.
 
 Before scoring a record, Q-PRIME resolves the active policy in this order:
 device override → stream override → global profile. The policy provides the

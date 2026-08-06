@@ -124,6 +124,7 @@ class MongoRepository:
         )
         self.db.configuration_history.create_index([("created_at", DESCENDING)])
         self.db.cloud_configuration.create_index([("updated_at", DESCENDING)])
+        self.db.producer_configuration.create_index([("updated_at", DESCENDING)])
         self.db.qoc_baselines.create_index("baseline_key", unique=True)
         self.db.query_metrics.create_index([("created_at", DESCENDING)])
         self._ensure_presto_schema()
@@ -182,17 +183,54 @@ class MongoRepository:
         return [json_safe(document) for document in documents]
 
     def activate_profile(self, profile: Dict[str, Any], audit: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a profile version and make it the active one for its selector.
+
+        The new version is inserted *before* older ones are retired, and the
+        retirement explicitly excludes it. Deactivating first allowed a
+        concurrent activation to switch off the row another thread had just
+        inserted, leaving the selector with no active profile at all — after
+        which every ingest failed with a duplicate-key error on the retry.
+        """
         scope = profile["scope"]
         selector = profile.get("selector", "")
-        self.db.weight_profiles.update_many(
-            {"scope": scope, "selector": selector, "active": True},
-            {"$set": {"active": False, "deactivated_at": utc_ms()}},
-        )
         document = copy.deepcopy(profile)
         document.update({"selector": selector, "active": True, "created_at": utc_ms()})
-        self.db.weight_profiles.insert_one(document)
+        inserted = self.db.weight_profiles.insert_one(document)
+        self.db.weight_profiles.update_many(
+            {
+                "scope": scope,
+                "selector": selector,
+                "active": True,
+                "_id": {"$ne": inserted.inserted_id},
+            },
+            {"$set": {"active": False, "deactivated_at": utc_ms()}},
+        )
+        # Two simultaneous activations can retire each other; make sure the
+        # selector is never left without an active profile.
+        if not self.db.weight_profiles.find_one(
+            {"scope": scope, "selector": selector, "active": True}
+        ):
+            self.db.weight_profiles.update_one(
+                {"_id": inserted.inserted_id},
+                {"$set": {"active": True}, "$unset": {"deactivated_at": ""}},
+            )
         self.db.configuration_history.insert_one(copy.deepcopy(audit))
         return json_safe(document)
+
+    def adopt_profile(
+        self, scope: str, selector: str, version: str
+    ) -> Optional[Dict[str, Any]]:
+        """Make an existing profile version active again.
+
+        Used when a concurrent seed lost the insert race, and to repair a
+        database already left with no active profile by the old ordering.
+        """
+        document = self.db.weight_profiles.find_one_and_update(
+            {"scope": scope, "selector": selector, "version": version},
+            {"$set": {"active": True}, "$unset": {"deactivated_at": ""}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return json_safe(document) if document else None
 
     def configuration_history(self, limit: int = 100) -> List[Dict[str, Any]]:
         documents = self.db.configuration_history.find({}).sort("created_at", DESCENDING).limit(
@@ -209,6 +247,17 @@ class MongoRepository:
         payload["_id"] = "active"
         self.db.cloud_configuration.replace_one({"_id": "active"}, payload, upsert=True)
         self.db.configuration_history.insert_one(copy.deepcopy(audit))
+        return json_safe(payload)
+
+    def producer_configuration(self) -> Optional[Dict[str, Any]]:
+        document = self.db.producer_configuration.find_one({"_id": "active"})
+        return json_safe(document) if document else None
+
+    def save_producer_configuration(self, document: Dict[str, Any]) -> Dict[str, Any]:
+        payload = copy.deepcopy(document)
+        payload.pop("_id", None)
+        payload.update({"_id": "active", "updated_at": utc_ms()})
+        self.db.producer_configuration.replace_one({"_id": "active"}, payload, upsert=True)
         return json_safe(payload)
 
     def get_baseline(self, baseline_key: str) -> Optional[Dict[str, Any]]:

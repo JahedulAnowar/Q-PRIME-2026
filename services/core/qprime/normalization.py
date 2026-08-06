@@ -45,6 +45,32 @@ def _context_value(value: Any, resource_name: str = "value") -> Dict[str, Any]:
     return result
 
 
+def _entity(value: Any, resource: Dict[str, Any]) -> Any:
+    """Keep a structured entity structured.
+
+    The stream schemas in ``services/core/schema`` reference ``entity.gateway_id``
+    and ``entity.location``, so a dict must survive normalisation for the QoC
+    completeness factor to resolve those paths. Coercing it to ``str`` here
+    produced a Python repr (``"{'gateway_id': ...}"``) that matched nothing and
+    silently capped completeness. ``pipeline`` flattens it to a label on the way
+    into MongoDB, where the column is declared ``varchar``.
+    """
+    if isinstance(value, dict):
+        return copy.deepcopy(value)
+    return str(value or resource.get("device_name") or "")
+
+
+def entity_label(value: Any) -> str:
+    """Flatten an entity to the scalar stored in MongoDB and exposed via SQL."""
+    if isinstance(value, dict):
+        for key in ("gateway_id", "name", "id", "location"):
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate)
+        return ""
+    return str(value or "")
+
+
 def _stable_id(record: Dict[str, Any]) -> str:
     supplied = _first(record, "record_id", "recordId", "id")
     if supplied:
@@ -76,7 +102,7 @@ def normalize_direct(payload: Dict[str, Any]) -> Dict[str, Any]:
     record = copy.deepcopy(raw)
     record.update(
         {
-            "entity": str(raw.get("entity") or resource.get("device_name") or ""),
+            "entity": _entity(raw.get("entity"), resource),
             "contextAttribute": attribute,
             "contextValue": _context_value(value, attribute),
             "resource": resource,
@@ -119,9 +145,17 @@ def normalize_edgex(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "gateway_id": str(tags.get("gateway_id") or "edgex"),
             "profile_name": profile_name,
         }
+        # Rebuild the structured entity from device tags so EdgeX-sourced
+        # records resolve the same schema paths as directly posted ones.
+        entity: Any = str(tags.get("entity") or device_name)
+        if tags.get("gateway_id") or tags.get("location"):
+            entity = {
+                "gateway_id": str(tags.get("gateway_id") or "edgex"),
+                "location": str(tags.get("location") or ""),
+            }
         canonical = {
             "record_id": reading_id or (f"{event_id}:{index}" if event_id else ""),
-            "entity": str(tags.get("entity") or device_name),
+            "entity": entity,
             "contextAttribute": str(tags.get("contextAttribute") or resource_name),
             "contextValue": _context_value(value, resource_name),
             "resource": resource,

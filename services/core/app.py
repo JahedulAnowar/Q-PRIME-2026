@@ -33,6 +33,7 @@ load_dotenv()
 app = Flask(__name__)
 START_MS = int(time.time() * 1000)
 EDGEX_METADATA_URL = os.getenv("EDGEX_METADATA_URL", "http://edgex-core-metadata:59881")
+PRODUCER_URL = os.getenv("QPRIME_PRODUCER_URL", "http://qprime-devices:5010").rstrip("/")
 
 
 def _edgex_health():
@@ -45,6 +46,17 @@ def _edgex_health():
         }
     except requests.RequestException as exc:
         return {"status": "unavailable", "url": EDGEX_METADATA_URL, "error": str(exc)}
+
+
+def _producer_request(method, path, payload=None):
+    try:
+        response = requests.request(method, f"{PRODUCER_URL}{path}", json=payload, timeout=10)
+        data = response.json()
+        if not response.ok:
+            raise ValueError(data.get("error") or f"Producer returned HTTP {response.status_code}")
+        return data
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Producer controller unavailable: {exc}") from exc
 
 
 @app.after_request
@@ -214,6 +226,60 @@ def cloud_config_probe():
         return jsonify(cloud_configuration.probe())
     except (TypeError, ValueError, RuntimeError) as exc:
         return jsonify({"error": str(exc)}), 400
+    except PyMongoError as exc:
+        return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
+
+
+@app.route("/api/producer/catalog")
+def producer_catalog():
+    try:
+        return jsonify(_producer_request("GET", "/api/catalog"))
+    except (RuntimeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@app.route("/api/producer/status")
+def producer_status():
+    try:
+        pipeline.initialise()
+        current = _producer_request("GET", "/api/status")
+        saved = repository.producer_configuration() or {"mode": "off", "devices": []}
+        return jsonify({"current": current, "saved": saved})
+    except (RuntimeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    except PyMongoError as exc:
+        return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
+
+
+@app.route("/api/producer/start", methods=["POST", "OPTIONS"])
+def producer_start():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        pipeline.initialise()
+        body = request.get_json(force=True) or {}
+        result = _producer_request("POST", "/api/start", body)
+        # Persist configuration only. Runtime state is deliberately never
+        # restored, keeping every Docker startup in the Off mode.
+        saved = repository.save_producer_configuration({"mode": body.get("mode"), "devices": body.get("devices") or []})
+        return jsonify({"current": result, "saved": saved})
+    except (RuntimeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    except PyMongoError as exc:
+        return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
+
+
+@app.route("/api/producer/stop", methods=["POST", "OPTIONS"])
+def producer_stop():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        pipeline.initialise()
+        current = _producer_request("POST", "/api/stop")
+        saved = repository.save_producer_configuration({"mode": "off", "devices": []})
+        return jsonify({"current": current, "saved": saved})
+    except (RuntimeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 503
     except PyMongoError as exc:
         return jsonify({"error": f"MongoDB unavailable: {exc}"}), 503
 

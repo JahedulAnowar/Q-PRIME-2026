@@ -9,7 +9,7 @@ from . import decision as decision_mod
 from . import sla as sla_mod
 from .cloud import AwsCloudAdapter, cloud_adapter
 from .cloud_config import cloud_configuration
-from .normalization import normalize_direct, normalize_edgex
+from .normalization import entity_label, normalize_direct, normalize_edgex
 from .profiles import PersistentConfig, persistent_config
 from .repository import MongoRepository, repository
 
@@ -21,7 +21,9 @@ def _record_document(
     resource = copy.deepcopy(record.get("resource") or {})
     return {
         "record_id": record["record_id"],
-        "entity": record.get("entity") or "",
+        # `entity` is declared varchar in repository.RECORD_FIELDS, so a
+        # structured entity is flattened to its label before storage.
+        "entity": entity_label(record.get("entity")),
         "contextattribute": record.get("contextAttribute") or "",
         "contextvalue": context_value,
         "resource": {
